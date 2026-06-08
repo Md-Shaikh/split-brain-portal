@@ -85,7 +85,7 @@ export const generateDeepInsights = async (logs, apiKey) => {
 
   Relational trends schema reference:
   {
-    "dominant_emotion": "overall macro emotion",
+    "dominant_emotion": "overall macro emotion (choose exactly one from: Productive, Calm, Grateful, Energetic, Hopeful, Stressed, Anxious, Sad, Angry, Lazy)",
     "daily_summary": "2-sentence summary of overall behavior pattern",
     "extracted_entities": [
       { "name": "person or project name", "context": "impact context", "valence": "positive|negative|neutral", "date": "YYYY-MM-DD" }
@@ -108,7 +108,7 @@ export const generateDeepInsights = async (logs, apiKey) => {
     console.error("Gracefully caught API error in generateDeepInsights:", error);
     return {
       dominant_emotion: "Balanced",
-      daily_summary: "Sync paused: Gemini cooling down...",
+      daily_summary: `Sync paused: Gemini API Error (${error.message})`,
       extracted_entities: [],
       recurring_topics: []
     };
@@ -180,7 +180,7 @@ export const classifyLogsEmotionGemini = async (logs, apiKey, allowedCategories)
   Return STRICTLY a JSON object mapping the index of each log to its category:
   {
     "classifications": [
-      { "index": 0, "category": "Focus|Anxiety|Burnout|Reflection|Lazy" }
+      { "index": 0, "category": "Productive|Calm|Grateful|Energetic|Hopeful|Stressed|Anxious|Sad|Angry|Lazy" }
     ]
   }
   Do not explain or add markdown.`;

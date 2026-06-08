@@ -62,36 +62,48 @@
 
   <!-- Dynamic Backdrop Glow Effects -->
   <div class="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-[120px] pointer-events-none backdrop-glow"></div>
+  <div class="absolute top-[40%] left-[30%] w-[550px] h-[550px] rounded-full bg-indigo-500/5 blur-[130px] pointer-events-none backdrop-glow" style="animation-delay: 1.5s;"></div>
   <div class="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] rounded-full bg-purple-500/10 blur-[150px] pointer-events-none backdrop-glow" style="animation-delay: 3s;"></div>
 
   <div id="root"></div>
 
   <!-- React Babel Application -->
   <script type="text/babel" data-type="module">
-    import { analyzeLogsWithGemini, askMyBrain, generateDeepInsights, classifyLogsEmotionGemini } from './LLMService.js?v=9';
-    import { extractEntitiesWithOracle, askPulseWithGroq, classifyLogsEmotion } from './LLMService_Oracle.js?v=9';
+    import { analyzeLogsWithGemini, askMyBrain, generateDeepInsights, classifyLogsEmotionGemini } from './LLMService.js?v=11';
+    import { extractEntitiesWithOracle, askPulseWithGroq, classifyLogsEmotion } from './LLMService_Oracle.js?v=11';
 
     const { useState, useEffect, useRef, useMemo } = React;
 
-    // Standard preset HSL states
+    // Standard preset HSL states (10 categories with emojis)
     const HSL_COLOR_PRESETS = [
-      { name: 'Focus', color: 'hsl(180, 70%, 50%)', border: 'border-cyan-500/30', glow: 'shadow-cyan-500/20', textColor: 'text-cyan-400', bg: 'bg-cyan-500/10' },
-      { name: 'Anxiety', color: 'hsl(15, 80%, 50%)', border: 'border-orange-500/30', glow: 'shadow-orange-500/20', textColor: 'text-orange-400', bg: 'bg-orange-500/10' },
-      { name: 'Burnout', color: 'hsl(0, 85%, 50%)', border: 'border-red-500/30', glow: 'shadow-red-500/20', textColor: 'text-red-400', bg: 'bg-red-500/10' },
-      { name: 'Reflection', color: 'hsl(270, 70%, 60%)', border: 'border-purple-500/30', glow: 'shadow-purple-500/20', textColor: 'text-purple-400', bg: 'bg-purple-500/10' },
-      { name: 'Lazy', color: 'hsl(210, 50%, 60%)', border: 'border-blue-500/30', glow: 'shadow-blue-500/20', textColor: 'text-blue-400', bg: 'bg-blue-500/10' }
+      { name: 'Productive', emoji: '🚀', color: 'hsl(142, 70%, 45%)', border: 'border-emerald-500/30', glow: 'shadow-emerald-500/20', textColor: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+      { name: 'Calm', emoji: '🧘', color: 'hsl(199, 80%, 48%)', border: 'border-sky-500/30', glow: 'shadow-sky-500/20', textColor: 'text-sky-400', bg: 'bg-sky-500/10' },
+      { name: 'Grateful', emoji: '🙏', color: 'hsl(45, 90%, 50%)', border: 'border-amber-500/30', glow: 'shadow-amber-500/20', textColor: 'text-amber-400', bg: 'bg-amber-500/10' },
+      { name: 'Energetic', emoji: '⚡', color: 'hsl(328, 95%, 50%)', border: 'border-pink-500/30', glow: 'shadow-pink-500/20', textColor: 'text-pink-400', bg: 'bg-pink-500/10' },
+      { name: 'Hopeful', emoji: '🌅', color: 'hsl(32, 95%, 48%)', border: 'border-orange-500/30', glow: 'shadow-orange-500/20', textColor: 'text-orange-400', bg: 'bg-orange-500/10' },
+      { name: 'Stressed', emoji: '🤯', color: 'hsl(0, 85%, 50%)', border: 'border-red-500/30', glow: 'shadow-red-500/20', textColor: 'text-red-400', bg: 'bg-red-500/10' },
+      { name: 'Anxious', emoji: '😰', color: 'hsl(22, 90%, 52%)', border: 'border-orange-600/30', glow: 'shadow-orange-600/20', textColor: 'text-orange-500', bg: 'bg-orange-600/10' },
+      { name: 'Sad', emoji: '😔', color: 'hsl(255, 75%, 55%)', border: 'border-indigo-500/30', glow: 'shadow-indigo-500/20', textColor: 'text-indigo-400', bg: 'bg-indigo-500/10' },
+      { name: 'Angry', emoji: '🔥', color: 'hsl(12, 95%, 48%)', border: 'border-rose-500/30', glow: 'shadow-rose-500/20', textColor: 'text-rose-400', bg: 'bg-rose-500/10' },
+      { name: 'Lazy', emoji: '🛋️', color: 'hsl(210, 90%, 50%)', border: 'border-blue-500/30', glow: 'shadow-blue-500/20', textColor: 'text-blue-400', bg: 'bg-blue-500/10' }
     ];
 
     const PRESET_KEYWORDS = {
-      'Focus': ['focus', 'work', 'code', 'productive', 'study', 'accomplished', 'goal', 'completed', 'writing', 'tasks', 'progress', 'design', 'development', 'programming', 'building'],
-      'Anxiety': ['anxiety', 'anxious', 'worried', 'stress', 'nervous', 'panic', 'scared', 'fear', 'tension', 'dread', 'uncomfortable', 'overthinking'],
-      'Burnout': ['burnout', 'exhausted', 'tired', 'overwhelmed', 'drain', 'fatigue', 'stuck', 'heavy', 'collapse', 'sleepy', 'drained', 'worn out'],
-      'Reflection': ['reflection', 'reflect', 'thought', 'think', 'journal', 'meditate', 'peaceful', 'calm', 'insight', 'mindful', 'nature', 'life', 'idea', 'understanding'],
+      'Productive': ['focus', 'work', 'code', 'productive', 'study', 'accomplished', 'goal', 'completed', 'writing', 'tasks', 'progress', 'design', 'development', 'programming', 'building'],
+      'Calm': ['calm', 'peaceful', 'quiet', 'relax', 'meditate', 'zen', 'serene', 'tranquil', 'chill'],
+      'Grateful': ['grateful', 'thankful', 'blessed', 'appreciate', 'happy', 'love', 'kindness'],
+      'Energetic': ['energetic', 'excited', 'hyped', 'motivate', 'workout', 'run', 'gym', 'active', 'power', 'pumped'],
+      'Hopeful': ['hopeful', 'optimistic', 'future', 'looking forward', 'excited', 'faith', 'dream'],
+      'Stressed': ['stressed', 'overwhelmed', 'pressure', 'deadline', 'busy', 'heavy', 'tired'],
+      'Anxious': ['anxious', 'anxiety', 'worried', 'nervous', 'fear', 'panic', 'scared', 'dread'],
+      'Sad': ['sad', 'unhappy', 'depressed', 'gloomy', 'cry', 'lonely', 'miss', 'heavy heart'],
+      'Angry': ['angry', 'frustrated', 'mad', 'annoyed', 'furious', 'rage', 'hate', 'irritated'],
       'Lazy': ['lazy', 'rest', 'chill', 'procrastinate', 'sleep', 'bed', 'movie', 'game', 'nothing', 'sluggish', 'idle', 'relaxed', 'napping']
     };
 
     const INITIAL_STATE_RULES = HSL_COLOR_PRESETS.map(preset => ({
       name: preset.name,
+      emoji: preset.emoji,
       color: preset.color,
       border: preset.border,
       glow: preset.glow,
@@ -100,21 +112,7 @@
       keywords: PRESET_KEYWORDS[preset.name] || [preset.name.toLowerCase()]
     }));
 
-    // Encryption Helpers
-    const encryptCustomCipher = (text) => {
-      const encoded = btoa(unescape(encodeURIComponent(text)));
-      return `[SHIELD:${encoded}]`;
-    };
 
-    const decodeCustomCipher = (text) => {
-      return text.replace(new RegExp("\\[SHIELD:([^\\]]+)\\]", "g"), (match, p1) => {
-        try {
-          return decodeURIComponent(escape(atob(p1)));
-        } catch (e) {
-          return match;
-        }
-      });
-    };
 
     // Helper to extract circle people, products, websites, software, projects from logs and Oracle entities
     const extractCirclePeople = (logs, oracleEntities = [], categoryOverrides = {}) => {
@@ -248,12 +246,33 @@
           entitiesMap[finalName].category = finalCategory;
         }
 
-        const hasContext = entitiesMap[finalName].mentions.some(m => m.content.includes(e.context));
+        // Find matching original log content to display full context under Circle & DNA
+        let matchedLogText = e.context || '';
+        if (Array.isArray(logs) && logs.length > 0) {
+          const matchingLog = logs.find(l => {
+            const lDate = l.date || l.Date || '';
+            const lContent = (l.content || l.Content || '').toLowerCase();
+            const eNameLower = oracleName.toLowerCase();
+            const eContextLower = (e.context || '').toLowerCase();
+            return lDate === e.date && (lContent.includes(eNameLower) || lContent.includes(eContextLower));
+          }) || logs.find(l => {
+            const lContent = (l.content || l.Content || '').toLowerCase();
+            const eNameLower = oracleName.toLowerCase();
+            const eContextLower = (e.context || '').toLowerCase();
+            return lContent.includes(eNameLower) || lContent.includes(eContextLower);
+          });
+          
+          if (matchingLog) {
+            matchedLogText = matchingLog.content || matchingLog.Content || matchedLogText;
+          }
+        }
+
+        const hasContext = entitiesMap[finalName].mentions.some(m => m.content === matchedLogText);
         if (!hasContext) {
           entitiesMap[finalName].mentions.push({
             date: e.date || getLocalTodayStr(),
             valence: e.valence || 'neutral',
-            content: e.context,
+            content: matchedLogText,
             mood: e.valence === 'positive' ? '6/7' : e.valence === 'negative' ? '2/7' : '4/7'
           });
         }
@@ -346,14 +365,11 @@
       const [circleSortOrder, setCircleSortOrder] = useState('Recent');
       const [selectedCirclePerson, setSelectedCirclePerson] = useState(null);
 
-      // 6. Emotion Category Rules
       const [activeCategories, setActiveCategories] = useState(INITIAL_STATE_RULES);
-      const [isLocalDecryptActive, setIsLocalDecryptActive] = useState(true);
 
       // 7. Daily Pulse State & Ref
       const [dailyPulseText, setDailyPulseText] = useState('');
       const [dailyPulseStatus, setDailyPulseStatus] = useState('idle'); // 'idle' | 'saving' | 'success' | 'error'
-      const [selectedPulseRange, setSelectedPulseRange] = useState({ start: 0, end: 0 });
       const [selectedPulseDate, setSelectedPulseDate] = useState(getLocalTodayStr);
       const pulseTextareaRef = useRef(null);
 
@@ -759,27 +775,7 @@
         }
       };
 
-      // Selective Encrypt text handler
-      const handlePulseTextSelection = () => {
-        if (pulseTextareaRef.current) {
-          const start = pulseTextareaRef.current.selectionStart;
-          const end = pulseTextareaRef.current.selectionEnd;
-          setSelectedPulseRange({ start, end });
-        }
-      };
 
-      const encryptSelectedPulseText = () => {
-        const { start, end } = selectedPulseRange;
-        if (start === end) {
-          alert("Please highlight a section of text in the input box first.");
-          return;
-        }
-        const selection = dailyPulseText.substring(start, end);
-        const encrypted = encryptCustomCipher(selection);
-        const newText = dailyPulseText.substring(0, start) + encrypted + dailyPulseText.substring(end);
-        setDailyPulseText(newText);
-        setSelectedPulseRange({ start: 0, end: 0 });
-      };
 
       // Save Daily Pulse log
       const saveDailyPulse = async () => {
@@ -944,44 +940,28 @@
       };
 
       return (
-        <div class="min-h-screen flex flex-col max-w-7xl mx-auto p-4 md:p-6 relative z-10">
+        <div class="min-h-screen flex flex-col max-w-7xl mx-auto p-4 md:p-6 pb-28 relative z-10">
           
-          {/* Top Navbar */}
-          <header class="flex flex-col sm:flex-row items-center justify-between border-b border-white/10 pb-6 mb-8 gap-4">
+          {/* Top Header */}
+          <header class="flex flex-row items-center justify-between border-b border-white/5 pb-5 mb-8 gap-4">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                <span class="font-display font-bold text-lg text-white">S</span>
+              <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-400 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <span class="font-display font-black text-lg text-white">S</span>
               </div>
               <div>
-                <h1 class="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-gray-200 to-gray-500 bg-clip-text text-transparent">
+                <h1 class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-gray-100 to-gray-400 bg-clip-text text-transparent">
                   SPLIT-BRAIN PORTAL
                 </h1>
-                <p class="text-xs text-gray-500 tracking-widest uppercase">Behavioral Cockpit v2.5</p>
+                <p class="text-[10px] text-gray-500 tracking-wider uppercase font-semibold">Behavioral Cockpit v3.0</p>
               </div>
             </div>
 
-            <nav class="flex gap-2 bg-white/5 border border-white/10 p-1.5 rounded-xl backdrop-blur-md">
-              <button 
-                onClick={() => setCurrentView('dashboard')}
-                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'dashboard' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
-                Cockpit
-              </button>
-              <button 
-                onClick={() => { setCurrentView('circle'); setSelectedCirclePerson(null); }}
-                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'circle' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
-                Your Circle
-              </button>
-              <button 
-                onClick={() => setCurrentView('daily-pulse')}
-                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'daily-pulse' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
-                Daily Pulse
-              </button>
-              <button 
-                onClick={() => setCurrentView('settings')}
-                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'settings' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
-                Settings
-              </button>
-            </nav>
+            <div class="flex items-center gap-2 px-3 py-1.5 bg-white/[0.02] border border-white/5 rounded-full backdrop-blur-md">
+              <span class={`w-2.5 h-2.5 rounded-full ${gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+              <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                {gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]' ? 'Cloud Sync Active' : 'Offline Mode'}
+              </span>
+            </div>
           </header>
 
           {/* Core Panel Content */}
@@ -1114,15 +1094,40 @@
                     )}
                   </section>
 
-                  {/* Ask Pulse Q&A Engine */}
+                  {/* Vivid Emotion Stats Cards Grid */}
                   <section class="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
-                    <h2 class="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                      <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      ASK PULSE MEMORY
-                    </h2>
-                    <p class="text-xs text-gray-400 mb-4">Interrogate your behavior database. Ask questions about patterns, projects, or feelings.</p>
+                    <h3 class="text-xs font-bold tracking-wider text-gray-400 uppercase mb-4">Behavioral State Totals</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                      {activeCategories.map(cat => {
+                        const count = matrixCounts[cat.name] || 0;
+                        return (
+                          <div 
+                            key={cat.name} 
+                            class={`border ${cat.border} ${cat.bg} rounded-xl p-3.5 flex items-center justify-between transition-all duration-300 hover:-translate-y-0.5 hover:scale-[1.03] ${cat.glow}`}>
+                            <div class="flex items-center gap-2">
+                              <span class="text-xl">{cat.emoji || '⚪'}</span>
+                              <div class="flex flex-col">
+                                <span class="text-xs font-bold text-white leading-none mb-0.5">{cat.name}</span>
+                              </div>
+                            </div>
+                            <span class="text-lg font-black text-white">{count}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  {/* Ask Pulse Q&A Engine (Combined in Cockpit) */}
+                  <section class="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
+                    <div class="mb-6">
+                      <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        PULSE VAULT SEARCH
+                      </h2>
+                      <p class="text-xs text-gray-400 mt-1">Interrogate your behavior database. Ask questions about patterns, projects, or feelings.</p>
+                    </div>
 
                     <div class="flex gap-2.5 mb-5">
                       <input 
@@ -1130,7 +1135,7 @@
                         value={askQuery}
                         onChange={(e) => setAskQuery(e.target.value)}
                         placeholder="e.g. When did I mention feeling burned out last week?"
-                        class="flex-grow bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-all text-white placeholder-gray-500"
+                        class="flex-grow bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-all text-white placeholder-gray-500 font-medium"
                       />
                       <button
                         onClick={executeAskPulse}
@@ -1177,7 +1182,7 @@
                                   </span>
                                 </div>
                                 <p class="text-xs text-gray-400 line-clamp-2 leading-relaxed">
-                                  {isLocalDecryptActive ? decodeCustomCipher(matchingLog.content) : matchingLog.content}
+                                  {matchingLog.content}
                                 </p>
                               </div>
                             );
@@ -1322,11 +1327,11 @@
                     <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
                     DAILY PULSE STREAMS
                   </h2>
-                  <p class="text-sm text-gray-400 mt-1.5 font-medium">Reflect, capture sensitive highlights, encrypt locally, and upload.</p>
+                  <p class="text-sm text-gray-400 mt-1.5 font-medium">Reflect, capture daily highlights, and upload to your cloud database.</p>
                 </div>
 
-                {/* Unified Date & Security Controls */}
-                <div class="flex flex-wrap items-center justify-between gap-4 mb-4 bg-white/[0.02] border border-white/5 rounded-xl p-3.5">
+                {/* Pulse Date Controls */}
+                <div class="mb-4 bg-white/[0.02] border border-white/5 rounded-xl p-3.5 flex items-center">
                   <div class="flex items-center gap-2.5 bg-white/5 border border-white/10 rounded-xl px-3.5 py-1.5 backdrop-blur-md">
                     <span class="text-xs text-gray-400 font-bold uppercase tracking-wider">Pulse Date:</span>
                     <input 
@@ -1336,47 +1341,17 @@
                       class="bg-transparent text-xs font-bold text-cyan-400 focus:outline-none cursor-pointer scheme-dark"
                     />
                   </div>
-                  
-                  <button
-                    onClick={() => setIsLocalDecryptActive(!isLocalDecryptActive)}
-                    class={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                      isLocalDecryptActive 
-                        ? 'bg-purple-600/20 text-purple-400 border-purple-500/30' 
-                        : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10'
-                    }`}>
-                    {isLocalDecryptActive ? 'Cipher Shield Active (Decrypted view)' : 'Cipher Shield Enabled (Raw code)'}
-                  </button>
                 </div>
 
                 <div class="relative mb-4">
                   <textarea
                     ref={pulseTextareaRef}
-                    value={isLocalDecryptActive ? decodeCustomCipher(dailyPulseText) : dailyPulseText}
-                    onChange={(e) => {
-                      if (isLocalDecryptActive) {
-                        // In active view mode, we update raw input
-                        setDailyPulseText(e.target.value);
-                      } else {
-                        setDailyPulseText(e.target.value);
-                      }
-                    }}
-                    onSelect={handlePulseTextSelection}
+                    value={dailyPulseText}
+                    onChange={(e) => setDailyPulseText(e.target.value)}
                     rows="8"
-                    placeholder="Write daily pulse logs, meeting outlines, or reflections. Highlight sensitive text inside this area to 'Select & Encrypt' with the custom cipher shield before pushing to the cloud..."
+                    placeholder="Write daily pulse logs, meeting outlines, or reflections..."
                     class="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-all font-mono leading-relaxed resize-none"
                   />
-                  
-                  {/* Select and Encrypt floating prompt */}
-                  {selectedPulseRange.start !== selectedPulseRange.end && (
-                    <button
-                      onClick={encryptSelectedPulseText}
-                      class="absolute bottom-4 right-4 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition-all flex items-center gap-1.5">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      </svg>
-                      Encrypt Highlighted
-                    </button>
-                  )}
                 </div>
 
                 {/* Submitting buttons and status bar */}
@@ -1432,6 +1407,7 @@
 
               </div>
             )}
+
 
             {/* VIEW 3: SETTINGS */}
             {currentView === 'settings' && (
@@ -2009,7 +1985,7 @@ function doGet(e) {
                           </span>
                         </div>
                         <p class="text-sm leading-relaxed text-gray-200">
-                          {isLocalDecryptActive ? decodeCustomCipher(log.content) : log.content}
+                          {log.content}
                         </p>
                       </div>
                     ))
@@ -2019,7 +1995,7 @@ function doGet(e) {
                 </div>
 
                 <div class="bg-zinc-950 border-t border-white/10 p-4 flex justify-between items-center">
-                  <span class="text-[10px] text-gray-500 uppercase tracking-widest font-mono">SPIN-DECRYPT SPOTLIGHT ENGINE v2.0</span>
+                  <span class="text-[10px] text-gray-500 uppercase tracking-widest font-mono">SPIN SPOTLIGHT ENGINE v2.0</span>
                   <button
                     onClick={() => setSelectedSpotlightDay(null)}
                     class="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-xs font-semibold text-white transition-all">
@@ -2029,6 +2005,32 @@ function doGet(e) {
               </div>
             </div>
           )}
+
+          {/* Floating Bottom Dock Menu */}
+          <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-black/60 border border-white/10 backdrop-blur-xl rounded-2xl px-4 py-2.5 shadow-2xl flex items-center gap-1.5 sm:gap-2">
+            {[
+              { id: 'dashboard', label: 'Cockpit', icon: '📊' },
+              { id: 'daily-pulse', label: 'Today\'s Pulse', icon: '📝' },
+              { id: 'circle', label: 'Circle & DNA', icon: '🧬' },
+              { id: 'settings', label: 'Settings', icon: '⚙️' }
+            ].map(tab => {
+              const isActive = currentView === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setCurrentView(tab.id)}
+                  class={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all relative duration-300 group ${
+                    isActive 
+                      ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-white/10 text-white shadow shadow-purple-500/10'
+                      : 'border border-transparent text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <span class={`text-sm transition-transform duration-300 group-hover:scale-110 ${isActive ? 'scale-110' : ''}`}>{tab.icon}</span>
+                  <span class="hidden md:inline">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
           {/* Global Footer */}
           <footer class="mt-8 border-t border-white/5 pt-6 text-center">
