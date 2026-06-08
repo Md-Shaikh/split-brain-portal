@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Split-Brain Portal - Behavioral Cockpit</title>
+  <meta name="description" content="Split-Brain Portal is a personal behavioral cockpit and emotion matrix dashboard, providing real-time cognitive logs, emotion analysis, and entity tracking powered by Gemini and Groq (Llama) models, synced securely with Google Sheets.">
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React and ReactDOM -->
@@ -1466,7 +1467,6 @@
                       class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500 transition-all font-mono"
                     />
                   </div>
-
                   <div>
                     <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Google Sheets Web App Integration URL</label>
                     <input 
@@ -1489,6 +1489,230 @@
                       class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-lg shadow-purple-500/10">
                       Force Sheet Sync
                     </button>
+                  </div>
+
+                  {/* Google Sheets Integration Guide Card */}
+                  <div class="mt-8 border-t border-white/10 pt-6">
+                    <h3 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                      <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Google Sheets Integration Guide
+                    </h3>
+                    <p class="text-xs text-gray-400 mb-4">Follow these simple steps to link your personal Google Sheet to this portal:</p>
+                    
+                    <div class="space-y-3.5 text-xs text-gray-300">
+                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
+                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">1</span>
+                        <div>
+                          <p class="font-bold text-white mb-0.5">Create a Google Sheet</p>
+                          <p class="text-gray-400">Go to your Google Drive, create a new spreadsheet, and add any column headers you like (e.g. <code>Date</code>, <code>Stream</code>, <code>Content</code>).</p>
+                        </div>
+                      </div>
+
+                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
+                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">2</span>
+                        <div>
+                          <p class="font-bold text-white mb-0.5">Open Apps Script Editor</p>
+                          <p class="text-gray-400">In the top menu of your Google Sheet, click on <strong>Extensions</strong> &rarr; <strong>Apps Script</strong>. This opens the script editor tab.</p>
+                        </div>
+                      </div>
+
+                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
+                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">3</span>
+                        <div>
+                          <p class="font-bold text-white mb-0.5">Paste Code & Save</p>
+                          <p class="text-gray-400 mb-3">Delete any code already in the editor, and paste the code from <code>google-apps-script.js</code>. Click the floppy disk icon to save.</p>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(`/**
+ * google-apps-script.js
+ * 
+ * Google Apps Script Web App receiver for Split-Brain Portal.
+ * Deploy this script as a Web App in Google Sheets with "Execute as: Me" and "Who has access: Anyone".
+ */
+
+function doPost(e) {
+  try {
+    const jsonString = e.postData.contents;
+    const payload = JSON.parse(jsonString);
+    
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = spreadsheet.getSheetByName("SplitBrainLogs") || spreadsheet.getSheets()[0];
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet("SplitBrainLogs");
+      sheet.appendRow(["Timestamp", "Date", "Stream", "Content", "Dominant Emotion", "AES Shield Masked"]);
+      
+      // Style headers
+      sheet.getRange(1, 1, 1, 6)
+        .setFontWeight("bold")
+        .setBackground("#111111")
+        .setFontColor("#ffffff")
+        .setHorizontalAlignment("center");
+    }
+    
+    const logs = Array.isArray(payload) ? payload : [payload];
+    const rows = sheet.getDataRange().getValues();
+    let headers = [];
+    if (rows.length > 0) {
+      headers = rows[0].map(h => String(h).toLowerCase().trim().replace(/[\s_]+/g, ''));
+    }
+    
+    if (headers.length === 0) {
+      sheet.appendRow(["Timestamp", "Date", "Stream", "Content", "Dominant Emotion", "AES Shield Masked"]);
+      headers = ["timestamp", "date", "stream", "content", "dominantemotion", "aesshieldmasked"];
+    }
+    
+    const getColIndex = (keys) => {
+      for (const key of keys) {
+        const normalizedKey = key.toLowerCase().replace(/[\s_]+/g, '');
+        const idx = headers.indexOf(normalizedKey);
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+    
+    const tsIdx = getColIndex(['timestamp', 'time']);
+    const dateIdx = getColIndex(['date']);
+    const streamIdx = getColIndex(['stream', 'streamtype', 'stream_type', 'category', 'type']);
+    const contentIdx = getColIndex(['content', 'text', 'journal', 'entry', 'log']);
+    const emotionIdx = getColIndex(['dominantemotion', 'dominant_emotion', 'emotion', 'state']);
+    const maskedIdx = getColIndex(['aesshieldmasked', 'aes_shield_masked', 'masked']);
+    
+    for (const log of logs) {
+      const isMasked = (log.content && log.content.includes("[") && log.content.includes("]")) ? "YES" : "NO";
+      
+      const timestampVal = log.timestamp || new Date().toISOString();
+      let dateVal = log.date || log.timestamp || new Date().toLocaleDateString();
+      const streamVal = log.stream || "Journal";
+      const contentVal = log.content || "";
+      const emotionVal = log.dominant_emotion || log.emotion || "Balanced";
+      const maskedVal = isMasked;
+      
+      // If the sheet has no separate "Timestamp" or "Time" column, write the full timestampVal directly to the Date column!
+      if (tsIdx === -1) {
+        dateVal = timestampVal;
+      }
+      
+      const rowData = new Array(headers.length).fill("");
+      
+      if (tsIdx !== -1) rowData[tsIdx] = timestampVal;
+      if (dateIdx !== -1) rowData[dateIdx] = dateVal;
+      if (streamIdx !== -1) rowData[streamIdx] = streamVal;
+      if (contentIdx !== -1) rowData[contentIdx] = contentVal;
+      if (emotionIdx !== -1) rowData[emotionIdx] = emotionVal;
+      if (maskedIdx !== -1) rowData[maskedIdx] = maskedVal;
+      
+      if (tsIdx === -1 && dateIdx === -1 && streamIdx === -1) {
+        sheet.appendRow([timestampVal, dateVal, streamVal, contentVal, emotionVal, maskedVal]);
+      } else {
+        sheet.appendRow(rowData);
+      }
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      message: \`\${logs.length} log(s) synchronized successfully.\`
+    })).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = spreadsheet.getSheetByName("SplitBrainLogs") || spreadsheet.getSheets()[0];
+    if (!sheet) {
+      return ContentService.createTextOutput(JSON.stringify([]))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    const rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) {
+      return ContentService.createTextOutput(JSON.stringify([]))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    const headers = rows[0].map(h => String(h).toLowerCase().trim().replace(/[\s_]+/g, ''));
+    
+    const getColIndex = (keys) => {
+      for (const key of keys) {
+        const normalizedKey = key.toLowerCase().replace(/[\s_]+/g, '');
+        const idx = headers.indexOf(normalizedKey);
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+    
+    const tsIdx = getColIndex(['timestamp', 'time']);
+    const dateIdx = getColIndex(['date']);
+    const streamIdx = getColIndex(['stream', 'streamtype', 'stream_type', 'category', 'type']);
+    const contentIdx = getColIndex(['content', 'text', 'journal', 'entry', 'log']);
+    const emotionIdx = getColIndex(['dominantemotion', 'dominant_emotion', 'emotion', 'state']);
+    const maskedIdx = getColIndex(['aesshieldmasked', 'aes_shield_masked', 'masked']);
+    
+    const logs = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      
+      const timestampVal = tsIdx !== -1 ? row[tsIdx] : row[0];
+      const dateVal = dateIdx !== -1 ? row[dateIdx] : (tsIdx !== -1 ? row[tsIdx] : row[0]);
+      const streamVal = streamIdx !== -1 ? row[streamIdx] : (row.length > 2 ? row[1] : "Journal");
+      const contentVal = contentIdx !== -1 ? row[contentIdx] : (row.length > 2 ? row[2] : row[1]);
+      const emotionVal = emotionIdx !== -1 ? row[emotionIdx] : "Balanced";
+      const maskedVal = maskedIdx !== -1 ? row[maskedIdx] : "NO";
+      
+      logs.push({
+        timestamp: timestampVal,
+        date: dateVal,
+        stream: streamVal,
+        content: contentVal,
+        dominant_emotion: emotionVal,
+        aes_shield_masked: maskedVal
+      });
+    }
+    
+    logs.sort((a, b) => new Date(b.date || b.timestamp) - new Date(a.date || a.timestamp));
+    
+    return ContentService.createTextOutput(JSON.stringify(logs))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`);
+                              alert("Apps Script code copied to clipboard!");
+                            }}
+                            class="px-3 py-1.5 bg-green-500/10 border border-green-500/20 text-green-400 font-bold rounded-lg hover:bg-green-500/20 transition-all">
+                            Copy Apps Script Code
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
+                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">4</span>
+                        <div>
+                          <p class="font-bold text-white mb-0.5">Deploy as Web App</p>
+                          <p class="text-gray-400">Click <strong>Deploy</strong> (top right) &rarr; <strong>New deployment</strong>. Set <i>Execute as</i> to <strong>"Me"</strong> and <i>Who has access</i> to <strong>"Anyone"</strong>, then click <strong>Deploy</strong>.</p>
+                        </div>
+                      </div>
+
+                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
+                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">5</span>
+                        <div>
+                          <p class="font-bold text-white mb-0.5">Link Web App URL</p>
+                          <p class="text-gray-400">Copy the generated Web App URL, paste it into the <i>Google Sheets Web App Integration URL</i> field above, and click <strong>Sync Configuration Settings</strong>.</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
