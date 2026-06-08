@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Split-Brain Portal - Behavioral Cockpit</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React and ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Inter & Outfit Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0b0b0f;
+    }
+    h1, h2, h3, h4, .font-display {
+      font-family: 'Outfit', sans-serif;
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+    /* Pulsing animations */
+    @keyframes subtle-pulse {
+      0%, 100% { opacity: 0.15; transform: scale(1); }
+      50% { opacity: 0.25; transform: scale(1.05); }
+    }
+    .backdrop-glow {
+      animation: subtle-pulse 8s infinite ease-in-out;
+    }
+    /* Date input custom styles */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator:hover {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen relative overflow-x-hidden">
+
+  <!-- Dynamic Backdrop Glow Effects -->
+  <div class="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-cyan-500/10 blur-[120px] pointer-events-none backdrop-glow"></div>
+  <div class="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] rounded-full bg-purple-500/10 blur-[150px] pointer-events-none backdrop-glow" style="animation-delay: 3s;"></div>
+
+  <div id="root"></div>
+
+  <!-- React Babel Application -->
+  <script type="text/babel" data-type="module">
+    import { analyzeLogsWithGemini, askMyBrain, generateDeepInsights, classifyLogsEmotionGemini } from './LLMService.js?v=9';
+    import { extractEntitiesWithOracle, askPulseWithGroq, classifyLogsEmotion } from './LLMService_Oracle.js?v=9';
+
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // Standard preset HSL states
+    const HSL_COLOR_PRESETS = [
+      { name: 'Focus', color: 'hsl(180, 70%, 50%)', border: 'border-cyan-500/30', glow: 'shadow-cyan-500/20', textColor: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+      { name: 'Anxiety', color: 'hsl(15, 80%, 50%)', border: 'border-orange-500/30', glow: 'shadow-orange-500/20', textColor: 'text-orange-400', bg: 'bg-orange-500/10' },
+      { name: 'Burnout', color: 'hsl(0, 85%, 50%)', border: 'border-red-500/30', glow: 'shadow-red-500/20', textColor: 'text-red-400', bg: 'bg-red-500/10' },
+      { name: 'Reflection', color: 'hsl(270, 70%, 60%)', border: 'border-purple-500/30', glow: 'shadow-purple-500/20', textColor: 'text-purple-400', bg: 'bg-purple-500/10' },
+      { name: 'Lazy', color: 'hsl(210, 50%, 60%)', border: 'border-blue-500/30', glow: 'shadow-blue-500/20', textColor: 'text-blue-400', bg: 'bg-blue-500/10' }
+    ];
+
+    const PRESET_KEYWORDS = {
+      'Focus': ['focus', 'work', 'code', 'productive', 'study', 'accomplished', 'goal', 'completed', 'writing', 'tasks', 'progress', 'design', 'development', 'programming', 'building'],
+      'Anxiety': ['anxiety', 'anxious', 'worried', 'stress', 'nervous', 'panic', 'scared', 'fear', 'tension', 'dread', 'uncomfortable', 'overthinking'],
+      'Burnout': ['burnout', 'exhausted', 'tired', 'overwhelmed', 'drain', 'fatigue', 'stuck', 'heavy', 'collapse', 'sleepy', 'drained', 'worn out'],
+      'Reflection': ['reflection', 'reflect', 'thought', 'think', 'journal', 'meditate', 'peaceful', 'calm', 'insight', 'mindful', 'nature', 'life', 'idea', 'understanding'],
+      'Lazy': ['lazy', 'rest', 'chill', 'procrastinate', 'sleep', 'bed', 'movie', 'game', 'nothing', 'sluggish', 'idle', 'relaxed', 'napping']
+    };
+
+    const INITIAL_STATE_RULES = HSL_COLOR_PRESETS.map(preset => ({
+      name: preset.name,
+      color: preset.color,
+      border: preset.border,
+      glow: preset.glow,
+      textColor: preset.textColor,
+      bg: preset.bg,
+      keywords: PRESET_KEYWORDS[preset.name] || [preset.name.toLowerCase()]
+    }));
+
+    // Encryption Helpers
+    const encryptCustomCipher = (text) => {
+      const encoded = btoa(unescape(encodeURIComponent(text)));
+      return `[SHIELD:${encoded}]`;
+    };
+
+    const decodeCustomCipher = (text) => {
+      return text.replace(new RegExp("\\[SHIELD:([^\\]]+)\\]", "g"), (match, p1) => {
+        try {
+          return decodeURIComponent(escape(atob(p1)));
+        } catch (e) {
+          return match;
+        }
+      });
+    };
+
+    // Helper to extract circle people, products, websites, software, projects from logs and Oracle entities
+    const extractCirclePeople = (logs, oracleEntities = [], categoryOverrides = {}) => {
+      const whitelist = [
+        { name: 'Dad', category: 'Family', pattern: /\b(dad|father)\b/i },
+        { name: 'Mom', category: 'Family', pattern: /\b(mom|mother)\b/i },
+        { name: 'Rayan', category: 'Friends', pattern: /\brayan\b/i },
+        { name: 'Asma', category: 'Partner', pattern: /\basma\b/i },
+        { name: 'Hamdan', category: 'Friends', pattern: /\bhamdan\b/i },
+        { name: 'Parents', category: 'Family', pattern: /\bparents\b/i },
+        { name: 'T', category: 'Work', pattern: /\bT\b/ } // case-sensitive for single letter T
+      ];
+
+      const entitiesMap = {};
+      const safeLogs = Array.isArray(logs) ? logs : [];
+
+      // 1. Process whitelist matches from local logs (always added as people)
+      safeLogs.forEach(log => {
+        const text = log.content || '';
+        const date = log.date || 'Unknown Date';
+        
+        let valence = 'neutral';
+        const emotion = (log.dominant_emotion || 'Lazy').toLowerCase();
+        if (['focus', 'reflection'].includes(emotion)) valence = 'positive';
+        if (['anxiety', 'burnout'].includes(emotion)) valence = 'negative';
+
+        whitelist.forEach(person => {
+          if (person.pattern.test(text)) {
+            const name = person.name;
+            const category = categoryOverrides[name] || person.category;
+            if (!entitiesMap[name]) {
+              entitiesMap[name] = {
+                name: name,
+                category: category,
+                mentions: []
+              };
+            } else if (categoryOverrides[name]) {
+              entitiesMap[name].category = categoryOverrides[name];
+            }
+            const alreadyMentioned = entitiesMap[name].mentions.some(m => m.content === text);
+            if (!alreadyMentioned) {
+              entitiesMap[name].mentions.push({
+                date: date,
+                valence: valence,
+                content: text,
+                mood: emotion === 'focus' ? '6/7' : emotion === 'reflection' ? '5/7' : emotion === 'anxiety' ? '3/7' : emotion === 'burnout' ? '2/7' : '4/7'
+              });
+            }
+          }
+        });
+      });
+
+      // 2. Process all oracle entities (including whitelisted people and products/software/websites/projects)
+      const safeOracleEntities = Array.isArray(oracleEntities) ? oracleEntities : [];
+      safeOracleEntities.forEach(e => {
+        if (!e.name || !e.context) return;
+        const oracleName = e.name.trim();
+        const lowerOracleName = oracleName.toLowerCase();
+        
+        // Find if this oracle name matches any of our whitelisted people
+        let matchedPerson = null;
+        whitelist.forEach(person => {
+          const isMatch = (person.name.toLowerCase() === lowerOracleName) || 
+                          (person.name === 'Dad' && (lowerOracleName === 'father' || lowerOracleName === 'dad')) ||
+                          (person.name === 'Mom' && (lowerOracleName === 'mother' || lowerOracleName === 'mom'));
+          if (isMatch) {
+            matchedPerson = person;
+          }
+        });
+
+        // Determine category based on type or fallback rules
+        let category = null;
+        let isWhitelistedPerson = !!matchedPerson;
+
+        // If type is explicitly provided by the LLM
+        if (e.type) {
+          const typeLower = e.type.toLowerCase();
+          if (typeLower === 'person') {
+            if (isWhitelistedPerson) {
+              category = matchedPerson.category;
+            } else {
+              // Ignore non-whitelisted people to prevent general vocabulary cluttering
+              return;
+            }
+          } else if (typeLower === 'product') {
+            category = 'Product';
+          } else if (typeLower === 'website') {
+            category = 'Website';
+          } else if (typeLower === 'software') {
+            category = 'Software';
+          } else if (typeLower === 'project') {
+            category = 'Project';
+          } else {
+            category = 'Project'; // default for other
+          }
+        } else {
+          // Fallback if no type is provided
+          if (isWhitelistedPerson) {
+            category = matchedPerson.category;
+          } else {
+            // Check context & name to infer type
+            const contextLower = e.context.toLowerCase();
+            if (lowerOracleName.includes('.com') || lowerOracleName.includes('.org') || lowerOracleName.includes('.net') || lowerOracleName.includes('http') || contextLower.includes('website') || contextLower.includes('site') || contextLower.includes('url')) {
+              category = 'Website';
+            } else if (lowerOracleName.includes('software') || lowerOracleName.includes('app') || contextLower.includes('software') || contextLower.includes('application') || contextLower.includes('tool') || contextLower.includes('engine')) {
+              category = 'Software';
+            } else if (lowerOracleName.includes('product') || contextLower.includes('product') || contextLower.includes('wearable') || contextLower.includes('device')) {
+              category = 'Product';
+            } else {
+              category = 'Project';
+            }
+          }
+        }
+
+        if (!category) return;
+
+        // Determine the final name (normalize whitelist to standard name, capitalize non-whitelist)
+        const finalName = isWhitelistedPerson 
+          ? matchedPerson.name 
+          : oracleName.charAt(0).toUpperCase() + oracleName.slice(1);
+
+        const finalCategory = categoryOverrides[finalName] || category;
+
+        if (!entitiesMap[finalName]) {
+          entitiesMap[finalName] = {
+            name: finalName,
+            category: finalCategory,
+            mentions: []
+          };
+        } else {
+          entitiesMap[finalName].category = finalCategory;
+        }
+
+        const hasContext = entitiesMap[finalName].mentions.some(m => m.content.includes(e.context));
+        if (!hasContext) {
+          entitiesMap[finalName].mentions.push({
+            date: e.date || getLocalTodayStr(),
+            valence: e.valence || 'neutral',
+            content: e.context,
+            mood: e.valence === 'positive' ? '6/7' : e.valence === 'negative' ? '2/7' : '4/7'
+          });
+        }
+      });
+
+      return Object.values(entitiesMap).map(p => {
+        p.mentions.sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        let posCount = 0;
+        let negCount = 0;
+        let neuCount = 0;
+        p.mentions.forEach(m => {
+          if (m.valence === 'positive') posCount++;
+          else if (m.valence === 'negative') negCount++;
+          else neuCount++;
+        });
+        
+        let overallValence = 'neutral';
+        if (posCount > negCount) overallValence = 'positive';
+        if (negCount > posCount) overallValence = 'negative';
+
+        let timeAgo = 'unknown';
+        if (p.mentions.length > 0) {
+          const diffTime = Math.abs(new Date() - new Date(p.mentions[0].date));
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays <= 1) timeAgo = 'today';
+          else if (diffDays < 7) timeAgo = `${diffDays}d ago`;
+          else timeAgo = `${Math.floor(diffDays / 7)}w ago`;
+        }
+
+        return {
+          ...p,
+          valence: overallValence,
+          posCount: posCount,
+          negCount: negCount,
+          neuCount: neuCount,
+          timeAgo: timeAgo,
+          mentionCount: p.mentions.length
+        };
+      }).filter(p => p.mentionCount > 0);
+    };
+
+    // Date & Time Helpers in local device timezone to prevent offset shifting
+    function getLocalTodayStr() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function getLocalTimestampStr(customDateStr) {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const datePart = customDateStr || getLocalTodayStr();
+      return `${datePart}T${hours}:${minutes}:${seconds}Z`;
+    }
+
+    function formatLocalDateStr(d) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function App() {
+      // 1. Navigation View State
+      const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' | 'daily-pulse' | 'settings'
+      
+      // 2. Configuration State (LocalStorage)
+      const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('sb_gemini_key') || '');
+      const [groqApiKey, setGroqApiKey] = useState(() => localStorage.getItem('sb_groq_key') || '');
+      const [gasUrl, setGasUrl] = useState(() => localStorage.getItem('sb_gas_url') || '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]');
+
+      // 3. Core Logs State
+      const [logs, setLogs] = useState(() => {
+        const stored = localStorage.getItem('splitbrain_logs_v3');
+        return stored ? JSON.parse(stored) : [];
+      });
+
+      // 4. Sheets Sync State
+      const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+      const [sheetsSyncError, setSheetsSyncError] = useState(null);
+
+      // 5. Circle / Relationship View State
+      const [circleSearchQuery, setCircleSearchQuery] = useState('');
+      const [circleCategoryFilter, setCircleCategoryFilter] = useState('All');
+      const [circleSortOrder, setCircleSortOrder] = useState('Recent');
+      const [selectedCirclePerson, setSelectedCirclePerson] = useState(null);
+
+      // 6. Emotion Category Rules
+      const [activeCategories, setActiveCategories] = useState(INITIAL_STATE_RULES);
+      const [isLocalDecryptActive, setIsLocalDecryptActive] = useState(true);
+
+      // 7. Daily Pulse State & Ref
+      const [dailyPulseText, setDailyPulseText] = useState('');
+      const [dailyPulseStatus, setDailyPulseStatus] = useState('idle'); // 'idle' | 'saving' | 'success' | 'error'
+      const [selectedPulseRange, setSelectedPulseRange] = useState({ start: 0, end: 0 });
+      const [selectedPulseDate, setSelectedPulseDate] = useState(getLocalTodayStr);
+      const pulseTextareaRef = useRef(null);
+
+      // 8. Q&A Box State
+      const [askQuery, setAskQuery] = useState('');
+      const [askResponse, setAskResponse] = useState(null);
+      const [askLoading, setAskLoading] = useState(false);
+      
+      // 9. Oracle Macro Insights & Sync Status
+      const [oracleInsights, setOracleInsights] = useState(() => {
+        const stored = localStorage.getItem('splitbrain_oracle_insights_v3');
+        return stored ? JSON.parse(stored) : null;
+      });
+      const [isSyncingOracle, setIsSyncingOracle] = useState(false);
+
+      // 10. Day Spotlight Modal State
+      const [selectedSpotlightDay, setSelectedSpotlightDay] = useState(null);
+
+      // 11. Speech to Text State & Ref
+      const [isDictating, setIsDictating] = useState(false);
+      const recognitionRef = useRef(null);
+
+      // 13. Batch Emotion Classification Status
+      const [isClassifyingEmotions, setIsClassifyingEmotions] = useState(false);
+
+      console.log("AskPulse received logs type:", typeof logs, "Is Array?", Array.isArray(logs), logs);
+
+      // 12. Entity Category Overrides
+      const [entityCategoryOverrides, setEntityCategoryOverrides] = useState(() => {
+        const stored = localStorage.getItem('sb_category_overrides');
+        return stored ? JSON.parse(stored) : {};
+      });
+
+      const handleUpdateEntityCategory = (name, newCategory) => {
+        setEntityCategoryOverrides(prev => {
+          const updated = { ...prev, [name]: newCategory };
+          localStorage.setItem('sb_category_overrides', JSON.stringify(updated));
+          return updated;
+        });
+      };
+
+      const circlePeople = useMemo(() => {
+        return extractCirclePeople(logs, oracleInsights?.extracted_entities || [], entityCategoryOverrides);
+      }, [logs, oracleInsights, entityCategoryOverrides]);
+
+      const activeCirclePerson = useMemo(() => {
+        if (!selectedCirclePerson) return null;
+        return circlePeople.find(p => p.name === selectedCirclePerson.name) || selectedCirclePerson;
+      }, [circlePeople, selectedCirclePerson]);
+
+      const filteredCirclePeople = useMemo(() => {
+        let list = [...circlePeople];
+        
+        // Search Filter
+        if (circleSearchQuery.trim()) {
+          const q = circleSearchQuery.toLowerCase();
+          list = list.filter(p => p.name.toLowerCase().includes(q));
+        }
+
+        // Category Filter
+        if (circleCategoryFilter !== 'All') {
+          list = list.filter(p => p.category === circleCategoryFilter);
+        }
+
+        // Sort Order
+        if (circleSortOrder === 'Recent') {
+          list.sort((a, b) => new Date(b.mentions[0].date) - new Date(a.mentions[0].date));
+        } else if (circleSortOrder === 'Most here') {
+          list.sort((a, b) => b.mentionCount - a.mentionCount);
+        } else if (circleSortOrder === 'A -> Z') {
+          list.sort((a, b) => a.name.localeCompare(b.name));
+        }
+
+        return list;
+      }, [circlePeople, circleSearchQuery, circleCategoryFilter, circleSortOrder]);
+
+      // Inline CSV parser for fallback
+      const parseCSV = (text) => {
+        const lines = [];
+        let row = [""];
+        let inQuotes = false;
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i];
+          const nextChar = text[i + 1];
+          if (char === String.fromCharCode(34)) {
+            if (inQuotes && nextChar === String.fromCharCode(34)) {
+              row[row.length - 1] += String.fromCharCode(34);
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === ',' && !inQuotes) {
+            row.push("");
+          } else if ((char === '\r' || char === '\n') && !inQuotes) {
+            if (char === '\r' && nextChar === '\n') {
+              i++;
+            }
+            lines.push(row);
+            row = [""];
+          } else {
+            row[row.length - 1] += char;
+          }
+        }
+        if (row.length > 1 || row[0] !== "") {
+          lines.push(row);
+        }
+        if (lines.length < 2) return [];
+        const rawHeaders = lines[0].map(h => h.trim());
+        const objects = [];
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i];
+          if (values.length === 1 && values[0] === "") continue;
+          const obj = {};
+          for (let j = 0; j < rawHeaders.length; j++) {
+            const headerName = rawHeaders[j];
+            const val = values[j] !== undefined ? values[j] : "";
+            obj[headerName] = val;
+          }
+          objects.push(obj);
+        }
+        return objects;
+      };
+
+      // Robust Log Normalizer
+      const normalizeLog = (log) => {
+        // Detect and fix column offset mismatch (e.g. if sheet has only [Date, Stream, Content] and no headers)
+        // in which case the Google Apps Script reads them as: timestamp=Date, date=Stream (e.g. "Journal"), stream=Content, content=undefined
+        const isMismatched = 
+          (log.timestamp && /^\d{4}-\d{2}-\d{2}/.test(String(log.timestamp))) &&
+          (log.date && isNaN(new Date(log.date).getTime())) &&
+          (!log.content);
+        
+        if (isMismatched) {
+          log.content = log.stream; // Content was read into stream
+          log.stream = log.date;    // Stream was read into date
+          log.date = log.timestamp; // Date was read into timestamp
+        }
+
+        const getProp = (keys) => {
+          for (const key of Object.keys(log)) {
+            const normalizedKey = key.toLowerCase().trim().replace(/[\s_]+/g, '');
+            for (const target of keys) {
+              if (normalizedKey === target.toLowerCase().replace(/[\s_]+/g, '')) {
+                return log[key];
+              }
+            }
+          }
+          return undefined;
+        };
+
+        const content = getProp(['content', 'text', 'journal', 'entry', 'log']) || '';
+        const stream = getProp(['stream', 'streamtype', 'stream_type', 'category', 'type']) || 'Journal';
+        let dateStr = getProp(['date', 'timestamp', 'time']);
+
+        let dominant_emotion = getProp(['dominant_emotion', 'dominantemotion', 'emotion', 'state']);
+        if (!dominant_emotion) {
+          // Local keyword-matching fallback classification (since Sheets usually lack emotion column)
+          dominant_emotion = 'Lazy';
+          const lowerContent = content.toLowerCase();
+          const categoriesToCheck = activeCategories || INITIAL_STATE_RULES;
+          for (const cat of categoriesToCheck) {
+            if (cat.keywords.some(kw => lowerContent.includes(kw))) {
+              dominant_emotion = cat.name;
+              break;
+            }
+          }
+        }
+
+        if (!dateStr && getProp(['timestamp'])) {
+          try {
+            const tsStr = String(getProp(['timestamp']));
+            const match = tsStr.match(/^(\d{4}-\d{2}-\d{2})/);
+            if (match) {
+              dateStr = match[1];
+            } else {
+              const parsedDate = new Date(tsStr);
+              if (!isNaN(parsedDate.getTime())) {
+                dateStr = formatLocalDateStr(parsedDate);
+              }
+            }
+          } catch (e) {}
+        }
+        if (!dateStr) {
+          dateStr = getLocalTodayStr();
+        } else {
+          try {
+            const match = String(dateStr).match(/^(\d{4}-\d{2}-\d{2})/);
+            if (match) {
+              dateStr = match[1];
+            } else {
+              const parsedDate = new Date(dateStr);
+              if (!isNaN(parsedDate.getTime())) {
+                dateStr = formatLocalDateStr(parsedDate);
+              }
+            }
+          } catch (e) {}
+        }
+
+        return {
+          date: dateStr,
+          stream: stream,
+          content: content,
+          dominant_emotion: dominant_emotion
+        };
+      };
+
+      const fetchSheetsData = async (targetUrl = gasUrl) => {
+        if (!targetUrl || !targetUrl.trim() || targetUrl === '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]') {
+          setSheetsSyncError("Please configure a valid Google Sheets URL in settings.");
+          return;
+        }
+        setIsSyncingSheets(true);
+        setSheetsSyncError(null);
+        try {
+          const response = await fetch(targetUrl);
+          if (!response.ok) {
+            throw new Error(`HTTP Error: ${response.status}`);
+          }
+          
+          const contentType = response.headers.get("content-type") || "";
+          const text = await response.text();
+          
+          let data;
+          if (contentType.includes("application/json") || text.trim().startsWith("[") || text.trim().startsWith("{")) {
+            data = JSON.parse(text);
+          } else {
+            if (text.includes("<!DOCTYPE") || text.includes("<html") || text.includes("<div")) {
+              throw new Error("Apps Script URL returned HTML instead of JSON/CSV. Ensure the script is deployed as a Web App with access set to 'Anyone'.");
+            }
+            data = parseCSV(text);
+          }
+
+          console.log("Raw Sheets Data:", data);
+          console.log("Fetched data:", data);
+
+          let logsArray = null;
+          if (Array.isArray(data)) {
+            logsArray = data;
+          } else if (data && typeof data === 'object') {
+            if (Array.isArray(data.logs)) {
+              logsArray = data.logs;
+            } else if (data.error) {
+              throw new Error(data.error);
+            } else {
+              const hasKeys = Object.keys(data).some(k => ['content', 'text', 'dominant_emotion', 'emotion', 'date', 'timestamp'].includes(k.toLowerCase().trim().replace(/[\s_]+/g, '')));
+              if (hasKeys) {
+                logsArray = [data];
+              }
+            }
+          }
+
+          if (logsArray !== null) {
+            const normalized = logsArray
+              .map(log => normalizeLog(log))
+              .filter(log => log.content && log.content.trim() !== "");
+            
+            setLogs(normalized);
+
+            if (normalized.length === 0) {
+              setOracleInsights(null);
+              localStorage.removeItem('splitbrain_oracle_insights_v3');
+            } else {
+              // Trigger batch emotion classification using Llama 3.3 or Gemini to analyze the full article contents
+              const triggerBatchClassification = async () => {
+                window.userTriggeredAIEvent = true; // allow AI calls
+                setIsClassifyingEmotions(true);
+                try {
+                  let classifications = [];
+                  if (groqApiKey && groqApiKey.trim()) {
+                    classifications = await classifyLogsEmotion(normalized, groqApiKey, activeCategories.map(c => c.name));
+                  } else if (geminiApiKey && geminiApiKey.trim()) {
+                    classifications = await classifyLogsEmotionGemini(normalized, geminiApiKey, activeCategories.map(c => c.name));
+                  }
+
+                  if (classifications && classifications.length > 0) {
+                    const updatedLogs = [...normalized];
+                    classifications.forEach(c => {
+                      if (updatedLogs[c.index]) {
+                        updatedLogs[c.index].dominant_emotion = c.category;
+                      }
+                    });
+                    setLogs(updatedLogs);
+                    console.log("Successfully classified logs emotions: ", classifications);
+                  }
+                } catch (e) {
+                  console.error("Batch emotion classification failed:", e);
+                } finally {
+                  setIsClassifyingEmotions(false);
+                }
+              };
+
+              setTimeout(triggerBatchClassification, 200);
+            }
+          } else {
+            throw new Error("Invalid response format from Apps Script");
+          }
+        } catch (err) {
+          console.error("Sheets synchronization error:", err);
+          setSheetsSyncError(err.message);
+        } finally {
+          setIsSyncingSheets(false);
+        }
+      };
+      // Note: States moved to the top of the App component to resolve temporal dead zone issues.
+
+      // Save to localStorage when state changes
+      useEffect(() => {
+        localStorage.setItem('splitbrain_logs_v3', JSON.stringify(logs));
+      }, [logs]);
+
+      useEffect(() => {
+        if (oracleInsights) {
+          localStorage.setItem('splitbrain_oracle_insights_v3', JSON.stringify(oracleInsights));
+        }
+      }, [oracleInsights]);
+
+      useEffect(() => {
+        if (gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]') {
+          fetchSheetsData(gasUrl);
+        }
+      }, []);
+
+      // Category Resolver
+      const resolveStateStyling = (emotionName) => {
+        if (!emotionName) {
+          return activeCategories.find(c => c.name === 'Lazy') || activeCategories[0];
+        }
+        const matched = activeCategories.find(c => c.name.toLowerCase() === emotionName.toLowerCase().trim());
+        if (matched) return matched;
+        return activeCategories.find(c => c.name === 'Lazy') || activeCategories[0];
+      };
+
+      // Emotional Matrix Counts (2D Grid calculation)
+      const matrixCounts = useMemo(() => {
+        const counts = {};
+        logs.forEach(log => {
+          const emotion = log.dominant_emotion || 'Lazy';
+          counts[emotion] = (counts[emotion] || 0) + 1;
+        });
+        return counts;
+      }, [logs]);
+
+      // 28-day grid dates
+      const gridDays = useMemo(() => {
+        const list = [];
+        const today = new Date();
+        for (let i = 27; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - i);
+          const dateStr = formatLocalDateStr(d);
+          
+          // Find matching logs for this date
+          const dayLogs = logs.filter(l => l.date === dateStr);
+          const dominant = dayLogs.length > 0 ? (dayLogs[0].dominant_emotion || 'Lazy') : null;
+          
+          list.push({
+            date: dateStr,
+            hasLog: dayLogs.length > 0,
+            dominantEmotion: dominant,
+            logs: dayLogs
+          });
+        }
+        return list;
+      }, [logs]);
+
+      // Speech-to-Text Setup
+      useEffect(() => {
+        if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          const rec = new SpeechRecognition();
+          rec.continuous = true;
+          rec.interimResults = false;
+          rec.lang = 'en-US';
+
+          rec.onresult = (event) => {
+            const transcript = event.results[event.results.length - 1][0].transcript;
+            setDailyPulseText(prev => prev + (prev ? ' ' : '') + transcript);
+          };
+
+          rec.onerror = (e) => {
+            console.error('Speech recognition error:', e);
+            setIsDictating(false);
+          };
+
+          rec.onend = () => {
+            setIsDictating(false);
+          };
+
+          recognitionRef.current = rec;
+        }
+      }, []);
+
+      const toggleSpeechDictation = () => {
+        if (!recognitionRef.current) {
+          alert('Web Speech API is not supported in this browser.');
+          return;
+        }
+        if (isDictating) {
+          recognitionRef.current.stop();
+        } else {
+          setIsDictating(true);
+          recognitionRef.current.start();
+        }
+      };
+
+      // Selective Encrypt text handler
+      const handlePulseTextSelection = () => {
+        if (pulseTextareaRef.current) {
+          const start = pulseTextareaRef.current.selectionStart;
+          const end = pulseTextareaRef.current.selectionEnd;
+          setSelectedPulseRange({ start, end });
+        }
+      };
+
+      const encryptSelectedPulseText = () => {
+        const { start, end } = selectedPulseRange;
+        if (start === end) {
+          alert("Please highlight a section of text in the input box first.");
+          return;
+        }
+        const selection = dailyPulseText.substring(start, end);
+        const encrypted = encryptCustomCipher(selection);
+        const newText = dailyPulseText.substring(0, start) + encrypted + dailyPulseText.substring(end);
+        setDailyPulseText(newText);
+        setSelectedPulseRange({ start: 0, end: 0 });
+      };
+
+      // Save Daily Pulse log
+      const saveDailyPulse = async () => {
+        if (!dailyPulseText.trim()) return;
+        setDailyPulseStatus('saving');
+        window.userTriggeredAIEvent = true;
+        
+        // Predict emotion based on keywords locally, or default to Lazy
+        let resolvedEmotion = 'Lazy';
+        const lowerText = dailyPulseText.toLowerCase();
+        for (const cat of activeCategories) {
+          if (cat.keywords.some(kw => lowerText.includes(kw))) {
+            resolvedEmotion = cat.name;
+            break;
+          }
+        }
+
+        const newLog = {
+          timestamp: getLocalTimestampStr(selectedPulseDate),
+          date: selectedPulseDate,
+          stream: 'Journal',
+          content: dailyPulseText,
+          dominant_emotion: resolvedEmotion
+        };
+
+        try {
+          // 1. Optional sync to Google Sheets
+          if (gasUrl.trim()) {
+            const resp = await fetch(gasUrl, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newLog)
+            });
+          }
+
+          // 2. Append/Update local state logs
+          setLogs(prev => {
+            const filtered = prev.filter(l => l.date !== selectedPulseDate);
+            return [newLog, ...filtered];
+          });
+
+          // 3. Trigger Gemini categorization analysis if key is set
+          if (geminiApiKey.trim()) {
+            try {
+              const geminiResult = await analyzeLogsWithGemini(
+                `Analyze this journal log: "${dailyPulseText}". 
+                Categorize it into exactly one of these emotions: Focus, Anxiety, Burnout, Reflection, Lazy. 
+                Return ONLY the name of the emotion.`, 
+                geminiApiKey
+              );
+              if (geminiResult) {
+                const cleanedEmotion = geminiResult.trim().replace(/[^a-zA-Z]/g, '');
+                if (HSL_COLOR_PRESETS.some(p => p.name.toLowerCase() === cleanedEmotion.toLowerCase())) {
+                  newLog.dominant_emotion = cleanedEmotion.charAt(0).toUpperCase() + cleanedEmotion.slice(1).toLowerCase();
+                  setLogs(prev => {
+                    const filtered = prev.filter(l => l.date !== selectedPulseDate);
+                    return [newLog, ...filtered];
+                  });
+                }
+              }
+            } catch (err) {
+              console.error("Gemini classification failed:", err);
+            }
+          }
+
+          setDailyPulseText('');
+          setSelectedPulseDate(getLocalTodayStr());
+          setDailyPulseStatus('success');
+          setTimeout(() => setDailyPulseStatus('idle'), 3000);
+        } catch (e) {
+          console.error("Failed synchronization:", e);
+          setDailyPulseStatus('error');
+          setTimeout(() => setDailyPulseStatus('idle'), 4000);
+        }
+      };
+
+      // Q&A Box submit (Ask Pulse routed to Groq)
+      const executeAskPulse = async () => {
+        if (!askQuery.trim()) return;
+        setAskLoading(true);
+        setAskResponse(null);
+        window.userTriggeredAIEvent = true;
+
+        if (!groqApiKey.trim()) {
+          // Groq key is offline, use local search fallback immediately
+          executeLocalSearchFallback(`Groq Key missing.`);
+          return;
+        }
+
+        const safeLogs = Array.isArray(logs) ? logs : [];
+
+        try {
+          console.log("PAYLOAD AUDIT - Sending to Groq:", JSON.stringify(safeLogs, null, 2));
+          const formattedPayload = safeLogs.map(l => `[${l.Date || l.date || 'Unknown Date'}]: ${l.Content || l.content || ''}`).join('\n');
+          const result = await askPulseWithGroq(askQuery, formattedPayload, groqApiKey);
+          if (result && result.answer) {
+            setAskResponse({
+              answer: result.answer,
+              sources: result.sources || []
+            });
+          } else {
+            throw new Error("Invalid API Response format");
+          }
+        } catch (err) {
+          console.warn("Groq Oracle Q&A failed, falling back to local memory index:", err);
+          executeLocalSearchFallback(err.message);
+        } finally {
+          setAskLoading(false);
+        }
+      };
+
+      // Local search fallback implementation
+      const executeLocalSearchFallback = (errReason) => {
+        const safeLogs = Array.isArray(logs) ? logs : [];
+        const query = askQuery.toLowerCase();
+        const matches = safeLogs.filter(l => (l.content || l.Content || '').toLowerCase().includes(query));
+        const matchedDates = matches.map(m => m.date || m.Date || 'Unknown Date');
+
+        setAskResponse({
+          answer: `AI Offline. Found ${matches.length} local matches.`,
+          sources: matchedDates,
+          isFallback: true
+        });
+      };
+
+      // Trigger Groq Oracle macro analysis
+      const syncOracleInsights = async () => {
+        if (logs.length === 0) {
+          setOracleInsights(null);
+          localStorage.removeItem('splitbrain_oracle_insights_v3');
+          return;
+        }
+        if (!groqApiKey.trim()) {
+          alert("Configure a valid Groq API Key in settings first.");
+          return;
+        }
+        setIsSyncingOracle(true);
+        window.userTriggeredAIEvent = true;
+
+        try {
+          const result = await extractEntitiesWithOracle(logs, groqApiKey, activeCategories.map(c => c.name));
+          if (result) {
+            setOracleInsights(result);
+          }
+        } catch (err) {
+          alert(`Sync failed: ${err.message}`);
+        } finally {
+          setIsSyncingOracle(false);
+        }
+      };
+
+      // Save Settings
+      const saveSettings = () => {
+        localStorage.setItem('sb_gemini_key', geminiApiKey);
+        localStorage.setItem('sb_groq_key', groqApiKey);
+        localStorage.setItem('sb_gas_url', gasUrl);
+        alert("Settings synchronized successfully.");
+        if (gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]') {
+          fetchSheetsData(gasUrl);
+        }
+      };
+
+      return (
+        <div class="min-h-screen flex flex-col max-w-7xl mx-auto p-4 md:p-6 relative z-10">
+          
+          {/* Top Navbar */}
+          <header class="flex flex-col sm:flex-row items-center justify-between border-b border-white/10 pb-6 mb-8 gap-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <span class="font-display font-bold text-lg text-white">S</span>
+              </div>
+              <div>
+                <h1 class="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-gray-200 to-gray-500 bg-clip-text text-transparent">
+                  SPLIT-BRAIN PORTAL
+                </h1>
+                <p class="text-xs text-gray-500 tracking-widest uppercase">Behavioral Cockpit v2.5</p>
+              </div>
+            </div>
+
+            <nav class="flex gap-2 bg-white/5 border border-white/10 p-1.5 rounded-xl backdrop-blur-md">
+              <button 
+                onClick={() => setCurrentView('dashboard')}
+                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'dashboard' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
+                Cockpit
+              </button>
+              <button 
+                onClick={() => { setCurrentView('circle'); setSelectedCirclePerson(null); }}
+                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'circle' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
+                Your Circle
+              </button>
+              <button 
+                onClick={() => setCurrentView('daily-pulse')}
+                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'daily-pulse' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
+                Daily Pulse
+              </button>
+              <button 
+                onClick={() => setCurrentView('settings')}
+                class={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'settings' ? 'bg-white/10 text-white border-white/10 shadow-md' : 'text-gray-400 hover:text-white'}`}>
+                Settings
+              </button>
+            </nav>
+          </header>
+
+          {/* Core Panel Content */}
+          <main class="flex-grow">
+            
+            {/* VIEW 1: COCKPIT (DASHBOARD) */}
+            {currentView === 'dashboard' && (
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Left Panel: Emotion Matrix & Ask Pulse */}
+                <div class="lg:col-span-2 flex flex-col gap-6">
+                  
+                  {/* Vivid Emotional Matrix */}
+                  <section class="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6 relative overflow-hidden">
+                    <div class="flex justify-between items-center mb-6">
+                      <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                          <span class={`w-2.5 h-2.5 rounded-full ${isClassifyingEmotions ? 'bg-purple-500 animate-ping' : 'bg-cyan-500 animate-pulse'}`}></span>
+                          VIVID EMOTIONAL MATRIX
+                          {isClassifyingEmotions && <span class="text-xs text-purple-400 font-medium animate-pulse ml-1">(Classifying emotions...)</span>}
+                          <button
+                            onClick={() => fetchSheetsData()}
+                            disabled={isSyncingSheets || isClassifyingEmotions}
+                            class="ml-2 p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all disabled:opacity-50 flex items-center justify-center border border-transparent hover:border-white/10"
+                            title="Sync logs from Google Sheets">
+                            <svg class={`w-4 h-4 ${isSyncingSheets ? 'animate-spin text-cyan-400' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
+                            </svg>
+                          </button>
+                        </h2>
+                        <p class="text-xs text-gray-400 mt-1">28-day behavioral state grid mapping. Click square to spotlight.</p>
+                      </div>
+                      
+                      {/* Presets Legends */}
+                      <div class="flex flex-wrap gap-2 text-[10px]">
+                        {activeCategories.map(cat => (
+                          <div key={cat.name} class="flex items-center gap-1.5 px-2 py-1 rounded bg-white/5 border border-white/5">
+                            <span class="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }}></span>
+                            <span class="text-gray-300 font-medium">{cat.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Matrix Grid Representation */}
+                    <div class="grid grid-cols-7 sm:grid-cols-14 gap-3 mb-4">
+                      {gridDays.map((day, idx) => {
+                        const style = day.dominantEmotion ? resolveStateStyling(day.dominantEmotion) : null;
+                        const dateObj = new Date(day.date);
+                        const label = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        
+                        return (
+                          <button
+                            key={day.date}
+                            onClick={() => setSelectedSpotlightDay(day)}
+                            class={`aspect-square rounded-xl flex flex-col items-center justify-between p-2 transition-all relative group border hover:scale-105 ${
+                              day.hasLog 
+                                ? `${style?.border} ${style?.bg} hover:border-white/40`
+                                : 'border-white/5 bg-white/[0.02] text-gray-600 hover:border-white/20'
+                            }`}
+                            title={`${day.date}: ${day.dominantEmotion || 'No log'}`}>
+                            
+                            <span class="text-[9px] text-gray-500 group-hover:text-white font-mono self-start">{idx + 1}</span>
+                            
+                            {day.hasLog ? (
+                              <span 
+                                class="w-3.5 h-3.5 rounded-full shadow-lg"
+                                style={{ 
+                                  backgroundColor: style?.color, 
+                                  boxShadow: `0 0 8px ${style?.color}` 
+                                }}></span>
+                            ) : (
+                              <span class="w-1.5 h-1.5 rounded-full bg-white/5"></span>
+                            )}
+                            
+                            <span class="text-[8px] text-gray-400 mt-1 truncate w-full text-center group-hover:text-white">{label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Loading & Empty Sync States */}
+                    {isSyncingSheets && (
+                      <div class="text-center py-8 border border-white/5 rounded-xl bg-white/[0.01]">
+                        <span class="w-6 h-6 border-2 border-white/20 border-t-cyan-400 rounded-full animate-spin inline-block mb-2"></span>
+                        <p class="text-xs text-gray-400">Syncing log entries from Google Sheets...</p>
+                      </div>
+                    )}
+
+                    {sheetsSyncError && (
+                      <div class="text-center py-6 border border-red-500/10 rounded-xl bg-red-500/5 mt-2">
+                        <p class="text-xs text-red-400">Sync Error: {sheetsSyncError}</p>
+                        <div class="flex gap-2 justify-center mt-2">
+                          <button
+                            onClick={() => fetchSheetsData()}
+                            class="text-[10px] px-3 py-1 bg-red-500/10 border border-red-500/20 text-red-400 font-semibold rounded-lg hover:bg-red-500/20 transition-all">
+                            Retry Pull
+                          </button>
+                          <button
+                            onClick={() => fetchSheetsData()}
+                            class="text-[10px] px-3 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 font-semibold rounded-lg hover:bg-purple-500/20 transition-all">
+                            Force Sheet Sync
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {logs.length === 0 && !isSyncingSheets && !sheetsSyncError && (
+                      <div class="text-center py-8 border border-dashed border-white/10 rounded-xl bg-white/[0.01] mt-2">
+                        <p class="text-sm text-gray-500 mb-2">No synchronized logs found in memory.</p>
+                        {gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]' ? (
+                          <div class="flex gap-2.5 justify-center">
+                            <button
+                              onClick={() => fetchSheetsData()}
+                              class="text-xs px-3.5 py-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-semibold rounded-lg hover:bg-cyan-500/20 transition-all">
+                              Pull logs from Google Sheets
+                            </button>
+                            <button
+                              onClick={() => fetchSheetsData()}
+                              class="text-xs px-3.5 py-1.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 font-semibold rounded-lg hover:bg-purple-500/20 transition-all">
+                              Force Sheet Sync
+                            </button>
+                          </div>
+                        ) : (
+                          <p class="text-xs text-purple-400">
+                            Configure your Google Sheets URL in <button onClick={() => setCurrentView('settings')} class="underline hover:text-purple-300 font-bold">Settings</button> to sync logs.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Ask Pulse Q&A Engine */}
+                  <section class="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
+                    <h2 class="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                      <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      ASK PULSE MEMORY
+                    </h2>
+                    <p class="text-xs text-gray-400 mb-4">Interrogate your behavior database. Ask questions about patterns, projects, or feelings.</p>
+
+                    <div class="flex gap-2.5 mb-5">
+                      <input 
+                        type="text"
+                        value={askQuery}
+                        onChange={(e) => setAskQuery(e.target.value)}
+                        placeholder="e.g. When did I mention feeling burned out last week?"
+                        class="flex-grow bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-all text-white placeholder-gray-500"
+                      />
+                      <button
+                        onClick={executeAskPulse}
+                        disabled={askLoading || !askQuery.trim()}
+                        class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white font-medium px-6 py-3 rounded-xl transition-all shadow-md shadow-purple-500/10 flex items-center gap-2">
+                        {askLoading ? (
+                          <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                        ) : 'Query'}
+                      </button>
+                    </div>
+
+                    {/* AI Response Core Box */}
+                    {askResponse && (
+                      <div class="bg-black/30 border border-white/5 rounded-xl p-5 mb-4 transition-all duration-300">
+                        <div class="flex items-center justify-between mb-3.5 border-b border-white/5 pb-2">
+                          <span class="text-xs font-bold tracking-wider text-purple-400 uppercase">
+                            {askResponse.isFallback ? 'Local Search Sync' : 'Groq Oracle Response'}
+                          </span>
+                          <span class="text-[10px] text-gray-500">Just Now</span>
+                        </div>
+                        <p class="text-sm leading-relaxed text-gray-200 font-medium">
+                          {askResponse.answer}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Supporting Source Memories */}
+                    {askResponse && askResponse.sources && askResponse.sources.length > 0 && (
+                      <div>
+                        <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5">Supporting Source Memories</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {askResponse.sources.map(srcDate => {
+                            const matchingLog = logs.find(l => l.date === srcDate);
+                            if (!matchingLog) return null;
+                            return (
+                              <div 
+                                key={srcDate} 
+                                onClick={() => setSelectedSpotlightDay({ date: srcDate, logs: [matchingLog] })}
+                                class="bg-white/[0.02] border border-white/5 rounded-xl p-3.5 hover:border-white/15 hover:bg-white/[0.04] transition-all cursor-pointer">
+                                <div class="flex justify-between items-center mb-1.5">
+                                  <span class="text-xs font-mono font-bold text-gray-300">{srcDate}</span>
+                                  <span class={`text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-white/5 ${resolveStateStyling(matchingLog.dominant_emotion).textColor}`}>
+                                    {matchingLog.dominant_emotion || 'Lazy'}
+                                  </span>
+                                </div>
+                                <p class="text-xs text-gray-400 line-clamp-2 leading-relaxed">
+                                  {isLocalDecryptActive ? decodeCustomCipher(matchingLog.content) : matchingLog.content}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                {/* Right Panel: Oracle Insights & Cockpit Relationships */}
+                <div class="flex flex-col gap-6">
+                  
+                  {/* Oracle Insights Card */}
+                  <section class="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
+                    <div class="flex justify-between items-center mb-4">
+                      <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        BEHAVIORAL INSIGHTS
+                      </h2>
+                      <button
+                        onClick={syncOracleInsights}
+                        disabled={isSyncingOracle}
+                        class="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all"
+                        title="Re-run AI Extraction Pipeline">
+                        <svg class={`w-4 h-4 ${isSyncingOracle ? 'animate-spin text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {oracleInsights ? (
+                      <div class="flex flex-col gap-4">
+                        
+                        {/* Macro Emotion */}
+                        <div class="bg-white/[0.02] border border-white/5 rounded-xl p-4">
+                          <span class="text-[10px] text-gray-400 uppercase tracking-widest block mb-1">Macro State</span>
+                          <span class="text-2xl font-black bg-gradient-to-r from-cyan-400 to-indigo-500 bg-clip-text text-transparent">
+                            {oracleInsights.dominant_emotion}
+                          </span>
+                        </div>
+
+                        {/* Daily Summary */}
+                        <div>
+                          <span class="text-[10px] text-gray-400 uppercase tracking-widest block mb-1">Trend Synthesis</span>
+                          <p class="text-xs text-gray-300 leading-relaxed">
+                            {oracleInsights.daily_summary}
+                          </p>
+                        </div>
+
+                        {/* Uncomfortable Truth */}
+                        {oracleInsights.uncomfortableTruth && (
+                          <div class="bg-red-500/5 border border-red-500/10 rounded-xl p-4">
+                            <span class="text-[10px] text-red-400 font-bold uppercase tracking-widest block mb-1">Uncomfortable Truth</span>
+                            <p class="text-xs text-red-300 italic leading-relaxed">
+                              "{oracleInsights.uncomfortableTruth}"
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Golden Pattern */}
+                        {oracleInsights.goldenPattern && (
+                          <div class="bg-green-500/5 border border-green-500/10 rounded-xl p-4">
+                            <span class="text-[10px] text-green-400 font-bold uppercase tracking-widest block mb-1">Golden Pattern</span>
+                            <p class="text-xs text-green-300 leading-relaxed">
+                              {oracleInsights.goldenPattern}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Recurring Topics */}
+                        {oracleInsights.recurring_topics && oracleInsights.recurring_topics.length > 0 && (
+                          <div>
+                            <span class="text-[10px] text-gray-400 uppercase tracking-widest block mb-2">Dominant Topics</span>
+                            <div class="flex flex-wrap gap-1.5">
+                              {oracleInsights.recurring_topics.map((t, idx) => (
+                                <span key={idx} class="text-[10px] px-2.5 py-1 bg-white/5 border border-white/5 rounded-full text-gray-300">
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div class="text-center py-10">
+                        <p class="text-sm text-gray-500 mb-4">No AI Insights Synchronized.</p>
+                        <button
+                          onClick={syncOracleInsights}
+                          class="px-4 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 rounded-xl text-xs font-semibold text-indigo-300 transition-all">
+                          Sync Oracle Now
+                        </button>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Extracted Entities relationships cockpit */}
+                  <section class="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
+                    <h2 class="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                      <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      RELATION COCKPIT
+                    </h2>
+                    <p class="text-xs text-gray-400 mb-4">Tracking extracted interpersonal and project dynamics.</p>
+
+                    {oracleInsights?.extracted_entities && oracleInsights.extracted_entities.length > 0 ? (
+                      <div class="flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-1">
+                        {oracleInsights.extracted_entities.map((e, idx) => (
+                          <div key={idx} class="bg-white/[0.02] border border-white/5 rounded-xl p-3 flex flex-col gap-1.5">
+                            <div class="flex justify-between items-center">
+                              <span class="text-xs font-bold text-white">{e.name}</span>
+                              <span class={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
+                                e.valence === 'positive' ? 'bg-green-500/10 text-green-400' :
+                                e.valence === 'negative' ? 'bg-red-500/10 text-red-400' : 'bg-gray-500/10 text-gray-400'
+                              }`}>
+                                {e.valence}
+                              </span>
+                            </div>
+                            <p class="text-[11px] text-gray-400 leading-relaxed">
+                              {e.context}
+                            </p>
+                            {e.date && <span class="text-[9px] text-gray-600 font-mono self-end">{e.date}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p class="text-xs text-gray-500 text-center py-6">No entity relationships extracted yet.</p>
+                    )}
+                  </section>
+                </div>
+              </div>
+            )}
+
+            {/* VIEW 2: DAILY PULSE INPUT */}
+            {currentView === 'daily-pulse' && (
+              <div class="max-w-3xl mx-auto bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
+                <div class="mb-6">
+                  <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
+                    DAILY PULSE STREAMS
+                  </h2>
+                  <p class="text-sm text-gray-400 mt-1.5 font-medium">Reflect, capture sensitive highlights, encrypt locally, and upload.</p>
+                </div>
+
+                {/* Unified Date & Security Controls */}
+                <div class="flex flex-wrap items-center justify-between gap-4 mb-4 bg-white/[0.02] border border-white/5 rounded-xl p-3.5">
+                  <div class="flex items-center gap-2.5 bg-white/5 border border-white/10 rounded-xl px-3.5 py-1.5 backdrop-blur-md">
+                    <span class="text-xs text-gray-400 font-bold uppercase tracking-wider">Pulse Date:</span>
+                    <input 
+                      type="date" 
+                      value={selectedPulseDate}
+                      onChange={(e) => setSelectedPulseDate(e.target.value)}
+                      class="bg-transparent text-xs font-bold text-cyan-400 focus:outline-none cursor-pointer scheme-dark"
+                    />
+                  </div>
+                  
+                  <button
+                    onClick={() => setIsLocalDecryptActive(!isLocalDecryptActive)}
+                    class={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                      isLocalDecryptActive 
+                        ? 'bg-purple-600/20 text-purple-400 border-purple-500/30' 
+                        : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10'
+                    }`}>
+                    {isLocalDecryptActive ? 'Cipher Shield Active (Decrypted view)' : 'Cipher Shield Enabled (Raw code)'}
+                  </button>
+                </div>
+
+                <div class="relative mb-4">
+                  <textarea
+                    ref={pulseTextareaRef}
+                    value={isLocalDecryptActive ? decodeCustomCipher(dailyPulseText) : dailyPulseText}
+                    onChange={(e) => {
+                      if (isLocalDecryptActive) {
+                        // In active view mode, we update raw input
+                        setDailyPulseText(e.target.value);
+                      } else {
+                        setDailyPulseText(e.target.value);
+                      }
+                    }}
+                    onSelect={handlePulseTextSelection}
+                    rows="8"
+                    placeholder="Write daily pulse logs, meeting outlines, or reflections. Highlight sensitive text inside this area to 'Select & Encrypt' with the custom cipher shield before pushing to the cloud..."
+                    class="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-all font-mono leading-relaxed resize-none"
+                  />
+                  
+                  {/* Select and Encrypt floating prompt */}
+                  {selectedPulseRange.start !== selectedPulseRange.end && (
+                    <button
+                      onClick={encryptSelectedPulseText}
+                      class="absolute bottom-4 right-4 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg shadow-purple-500/20 transition-all flex items-center gap-1.5">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                      Encrypt Highlighted
+                    </button>
+                  )}
+                </div>
+
+                {/* Submitting buttons and status bar */}
+                <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div class="flex gap-2">
+                    <button 
+                      onClick={toggleSpeechDictation}
+                      class={`px-4 py-2.5 rounded-xl border text-sm font-semibold flex items-center gap-2 transition-all ${
+                        isDictating 
+                          ? 'bg-red-500/20 text-red-400 border-red-500/30' 
+                          : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10'
+                      }`}>
+                      <svg class={`w-4 h-4 ${isDictating ? 'animate-pulse' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                      </svg>
+                      {isDictating ? 'Listening...' : 'Dictate'}
+                    </button>
+                  </div>
+
+                  <div class="flex items-center gap-3 w-full sm:w-auto">
+                    {dailyPulseStatus === 'success' && <span class="text-xs text-green-400 font-medium">✓ Memory stored locally and synced.</span>}
+                    {dailyPulseStatus === 'error' && <span class="text-xs text-red-400 font-medium">✗ Local check error. Sync paused.</span>}
+                    
+                    <button
+                      onClick={saveDailyPulse}
+                      disabled={!dailyPulseText.trim() || dailyPulseStatus === 'saving'}
+                      class="flex-grow sm:flex-grow-0 bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 disabled:opacity-50 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-2">
+                      {dailyPulseStatus === 'saving' ? (
+                        <>
+                          <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                          Saving Daily Log...
+                        </>
+                      ) : 'Push Daily Log to Sheets'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Categories rules helper box */}
+                <div class="mt-8 border-t border-white/5 pt-6">
+                  <h4 class="text-xs font-bold tracking-wider text-gray-400 uppercase mb-3">Active Category State Keywords</h4>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {activeCategories.map(cat => (
+                      <div key={cat.name} class="bg-white/[0.01] border border-white/5 rounded-xl p-3 flex flex-col gap-1">
+                        <div class="flex items-center gap-2">
+                          <span class="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }}></span>
+                          <span class="text-xs font-bold text-white">{cat.name}</span>
+                        </div>
+                        <span class="text-[10px] text-gray-500 truncate">Keywords: {cat.keywords.join(', ')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* VIEW 3: SETTINGS */}
+            {currentView === 'settings' && (
+              <div class="max-w-2xl mx-auto bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
+                <h2 class="text-2xl font-bold text-white mb-2 flex items-center gap-2">
+                  <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  ENGINE CONFIGURATION
+                </h2>
+                <p class="text-sm text-gray-400 mb-6">Manage API credential endpoints and local configuration mapping rules.</p>
+
+                <div class="flex flex-col gap-5">
+                  <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Gemini API Key</label>
+                    <input 
+                      type="password" 
+                      value={geminiApiKey}
+                      onChange={(e) => setGeminiApiKey(e.target.value)}
+                      placeholder="AI_KEY_..." 
+                      class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500 transition-all font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Groq API Key (Oracle / Ask Pulse)</label>
+                    <input 
+                      type="password" 
+                      value={groqApiKey}
+                      onChange={(e) => setGroqApiKey(e.target.value)}
+                      placeholder="gsk_..." 
+                      class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500 transition-all font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Google Sheets Web App Integration URL</label>
+                    <input 
+                      type="text" 
+                      value={gasUrl}
+                      onChange={(e) => setGasUrl(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec" 
+                      class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500 transition-all"
+                    />
+                  </div>
+
+                  <div class="flex flex-col sm:flex-row gap-3 mt-4">
+                    <button
+                      onClick={saveSettings}
+                      class="flex-grow bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/10">
+                      Sync Configuration Settings
+                    </button>
+                    <button
+                      onClick={() => fetchSheetsData()}
+                      class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-lg shadow-purple-500/10">
+                      Force Sheet Sync
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* VIEW 4: YOUR CIRCLE */}
+            {currentView === 'circle' && (
+              <div class="max-w-4xl mx-auto">
+                {!selectedCirclePerson ? (
+                  // Grid View
+                  <div>
+                    {/* Header */}
+                    <div class="mb-6">
+                      <span class="text-xs font-bold tracking-widest text-purple-400 uppercase font-mono block mb-1">YOUR CIRCLE</span>
+                      <h2 class="text-3xl font-black text-white tracking-tight">The people & entities in your life.</h2>
+                      <p class="text-sm text-gray-400 mt-1.5 font-medium">
+                        {circlePeople.length} {circlePeople.length === 1 ? 'member/entity has' : 'members/entities have'} come up since May 2026. The ones who keep coming back are your Circle.
+                      </p>
+                    </div>
+
+                    {/* Search and Filters */}
+                    <div class="flex flex-col gap-4 mb-6">
+                      {/* Search Bar */}
+                      <div class="relative flex items-center">
+                        <svg class="w-4 h-4 text-gray-500 absolute left-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        <input
+                          type="text"
+                          value={circleSearchQuery}
+                          onChange={(e) => setCircleSearchQuery(e.target.value)}
+                          placeholder="Find someone"
+                          class="w-full bg-white/5 border border-white/10 rounded-xl pl-11 pr-5 py-3 text-sm focus:outline-none focus:border-purple-500 transition-all text-white placeholder-gray-500 font-medium"
+                        />
+                      </div>
+
+                      {/* Filter Pills and Sort */}
+                      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        {/* Category Pills */}
+                        <div class="flex flex-wrap gap-2">
+                          {['All', 'Family', 'Partner', 'Friends', 'Work', 'Product', 'Website', 'Software', 'Project'].map(cat => (
+                            <button
+                              key={cat}
+                              onClick={() => setCircleCategoryFilter(cat)}
+                              class={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                                circleCategoryFilter === cat
+                                  ? 'bg-white text-black border-white'
+                                  : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+                              }`}>
+                              {cat}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Sort Order */}
+                        <div class="flex items-center gap-3 text-xs">
+                          <span class="text-gray-500 font-bold uppercase tracking-wider">SORT</span>
+                          {['Recent', 'Most here', 'A -> Z'].map(sort => (
+                            <button
+                              key={sort}
+                              onClick={() => setCircleSortOrder(sort)}
+                              class={`font-bold transition-all ${
+                                circleSortOrder === sort
+                                  ? 'text-yellow-400 underline decoration-2 underline-offset-4'
+                                  : 'text-gray-400 hover:text-white'
+                              }`}>
+                              {sort}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Circle Grid */}
+                    {filteredCirclePeople.length > 0 ? (
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {filteredCirclePeople.map(person => {
+                          const initials = person.name.slice(0, 2).toUpperCase();
+                          const toneColor = 
+                            person.valence === 'positive' ? 'bg-green-500/10 border-green-500/20 text-green-400 shadow-green-500/10' :
+                            person.valence === 'negative' ? 'bg-red-500/10 border-red-500/20 text-red-400 shadow-red-500/10' :
+                            'bg-gray-500/10 border-gray-500/20 text-gray-400 shadow-gray-500/10';
+                            
+                          const dotColor = 
+                            person.valence === 'positive' ? 'bg-green-500' :
+                            person.valence === 'negative' ? 'bg-red-500' :
+                            'bg-gray-500';
+
+                          return (
+                            <button
+                              key={person.name}
+                              onClick={() => setSelectedCirclePerson(person)}
+                              class="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between hover:bg-white/[0.08] hover:border-white/20 transition-all text-left group">
+                              <div class="flex items-center gap-3.5">
+                                {/* Initial Avatar */}
+                                <div class={`w-12 h-12 rounded-full flex items-center justify-center font-display font-bold text-lg border ${toneColor}`}>
+                                  {person.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <h4 class="font-bold text-white group-hover:text-purple-400 transition-all text-sm">{person.name}</h4>
+                                  <span class="text-xs text-gray-400 font-medium">
+                                    {person.mentionCount} {person.mentionCount === 1 ? 'mention' : 'mentions'} • {person.timeAgo}
+                                  </span>
+                                </div>
+                              </div>
+                              <span class={`w-2 h-2 rounded-full ${dotColor} mr-1`}></span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div class="text-center py-12 border border-dashed border-white/10 rounded-2xl bg-white/[0.01]">
+                        <p class="text-sm text-gray-500">No members in this circle matching your filters.</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  // Detail View
+                  <div class="bg-white/5 border border-white/10 backdrop-blur-md rounded-2xl p-6">
+                    {/* Back Button */}
+                    <button
+                      onClick={() => setSelectedCirclePerson(null)}
+                      class="flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-white mb-6 uppercase tracking-wider font-mono">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                      </svg>
+                      Circle
+                    </button>
+
+                    {/* Profile Header */}
+                    <div class="flex items-center gap-4 mb-8">
+                      <div class={`w-16 h-16 rounded-full flex items-center justify-center font-display font-black text-2xl border ${
+                        activeCirclePerson.valence === 'positive' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
+                        activeCirclePerson.valence === 'negative' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                        'bg-gray-500/10 border-gray-500/20 text-gray-400'
+                      }`}>
+                        {activeCirclePerson.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div class="flex-grow">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <span class="text-xs text-gray-400 font-bold uppercase tracking-wider block mb-0.5">
+                              {activeCirclePerson.category.toLowerCase()} • in your circle
+                            </span>
+                            <h3 class="text-2xl font-black text-white tracking-tight">{activeCirclePerson.name}</h3>
+                          </div>
+                          
+                          {/* Manual Category Dropdown Selector */}
+                          <div class="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 backdrop-blur-md">
+                            <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Category:</span>
+                            <select
+                              value={activeCirclePerson.category}
+                              onChange={(e) => handleUpdateEntityCategory(activeCirclePerson.name, e.target.value)}
+                              class="bg-transparent text-xs font-bold text-cyan-400 focus:outline-none cursor-pointer">
+                              {['Family', 'Partner', 'Friends', 'Work', 'Product', 'Website', 'Software', 'Project'].map(cat => (
+                                <option key={cat} value={cat} class="bg-zinc-900 text-white">{cat}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <span class="text-xs text-gray-500 font-mono block mt-1">
+                          {activeCirclePerson.mentionCount} {activeCirclePerson.mentionCount === 1 ? 'mention' : 'mentions'} • since May 2026
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Stats Layout */}
+                    <div class="flex flex-col gap-6">
+                      {/* Timeline Moment Box */}
+                      <div class="bg-black/30 border border-white/5 rounded-xl p-5">
+                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mb-4">HOW YOU FEEL WHEN THEY COME UP</span>
+                        
+                        {/* Dot representation timeline */}
+                        <div class="relative flex items-center justify-between px-4 py-2 mb-2">
+                          <div class="absolute left-4 right-4 h-0.5 border-t border-dashed border-white/10"></div>
+                          {activeCirclePerson.mentions.map((m, idx) => (
+                            <div
+                              key={idx}
+                              class={`w-2.5 h-2.5 rounded-full relative z-10 transition-all cursor-pointer hover:scale-125 ${
+                                m.valence === 'positive' ? 'bg-green-500 shadow shadow-green-500/40' :
+                                m.valence === 'negative' ? 'bg-red-500 shadow shadow-red-500/40' :
+                                'bg-gray-500 shadow shadow-gray-500/40'
+                              }`}
+                              title={`${m.date}: ${m.valence}`}></div>
+                          ))}
+                        </div>
+                        <span class="text-[10px] text-gray-400 italic font-mono block text-right mt-1">
+                          Across {activeCirclePerson.mentionCount} {activeCirclePerson.mentionCount === 1 ? 'moment' : 'moments'}
+                        </span>
+                      </div>
+
+                      {/* Tone analysis bar */}
+                      <div class="bg-black/30 border border-white/5 rounded-xl p-5">
+                        <span class="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mb-3">TONE OF YOUR MENTIONS</span>
+                        
+                        {/* Horizontal Progress Bar */}
+                        <div class="h-2 rounded-full overflow-hidden flex bg-white/5 mb-3">
+                          {activeCirclePerson.posCount > 0 && (
+                            <div
+                              style={{ width: `${(activeCirclePerson.posCount / activeCirclePerson.mentionCount) * 100}%` }}
+                              class="bg-green-500"></div>
+                          )}
+                          {activeCirclePerson.neuCount > 0 && (
+                            <div
+                              style={{ width: `${(activeCirclePerson.neuCount / activeCirclePerson.mentionCount) * 100}%` }}
+                              class="bg-gray-500"></div>
+                          )}
+                          {activeCirclePerson.negCount > 0 && (
+                            <div
+                              style={{ width: `${(activeCirclePerson.negCount / activeCirclePerson.mentionCount) * 100}%` }}
+                              class="bg-red-500"></div>
+                          )}
+                        </div>
+
+                        {/* Tone counts labels */}
+                        <div class="flex justify-between text-[10px] text-gray-400 font-mono">
+                          <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>{activeCirclePerson.posCount} positive</span>
+                          <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>{activeCirclePerson.neuCount} neutral</span>
+                          <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>{activeCirclePerson.negCount} negative</span>
+                        </div>
+                      </div>
+
+                      {/* Synthesis Banner */}
+                      <div class="bg-purple-500/5 border border-purple-500/10 rounded-xl p-4">
+                        <p class="text-xs text-purple-300 leading-relaxed font-medium">
+                          {activeCirclePerson.name} has shown up {activeCirclePerson.mentionCount === 1 ? 'once' : 'once or twice'}. 
+                          {activeCirclePerson.mentionCount <= 2 ? " Mention them again and I'll start noticing patterns." : " Showing clear recurrent behavioral connections."}
+                        </p>
+                      </div>
+
+                      {/* Mentions logs timeline */}
+                      <div>
+                        <span class="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-3 font-mono">WHEN THEY APPEAR</span>
+                        <div class="flex flex-col gap-3">
+                          {activeCirclePerson.mentions.map((m, idx) => (
+                            <div key={idx} class="bg-black/20 border border-white/5 rounded-xl p-4">
+                              <div class="flex justify-between items-center mb-2 pb-1.5 border-b border-white/5">
+                                <span class="text-xs font-mono font-bold text-gray-400">{m.date}</span>
+                                <div class="flex gap-1.5">
+                                  <span class={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                                    m.valence === 'positive' ? 'bg-green-500/10 text-green-400' :
+                                    m.valence === 'negative' ? 'bg-red-500/10 text-red-400' :
+                                    'bg-gray-500/10 text-gray-400'
+                                  }`}>{m.valence}</span>
+                                  <span class="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 font-mono">mood {m.mood}</span>
+                                </div>
+                              </div>
+                              <p class="text-xs text-gray-300 leading-relaxed font-medium">{m.content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </main>
+
+          {/* DAY SPOTLIGHT MODAL */}
+          {selectedSpotlightDay && (
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div 
+                onClick={() => setSelectedSpotlightDay(null)}
+                class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+              
+              <div class="relative bg-zinc-900 border border-white/10 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl relative z-10">
+                <div class="flex justify-between items-center border-b border-white/10 p-5">
+                  <div>
+                    <h3 class="text-lg font-bold text-white">Day Spotlight</h3>
+                    <p class="text-xs text-gray-400 font-mono mt-0.5">{selectedSpotlightDay.date}</p>
+                  </div>
+                  <button 
+                    onClick={() => setSelectedSpotlightDay(null)}
+                    class="text-gray-400 hover:text-white p-1 hover:bg-white/5 rounded-lg transition-all">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="p-6 flex flex-col gap-4 max-h-[400px] overflow-y-auto">
+                  {selectedSpotlightDay.logs && selectedSpotlightDay.logs.length > 0 ? (
+                    selectedSpotlightDay.logs.map((log, idx) => (
+                      <div key={idx} class="bg-white/[0.01] border border-white/5 rounded-xl p-4 flex flex-col gap-3">
+                        <div class="flex justify-between items-center">
+                          <span class="text-[10px] uppercase font-mono font-bold tracking-widest text-gray-500">
+                            Stream: {log.stream || 'Journal'}
+                          </span>
+                          <span class={`text-[10px] font-bold px-2 py-0.5 rounded-full ${resolveStateStyling(log.dominant_emotion).textColor}`}>
+                            State: {log.dominant_emotion || 'Lazy'}
+                          </span>
+                        </div>
+                        <p class="text-sm leading-relaxed text-gray-200">
+                          {isLocalDecryptActive ? decodeCustomCipher(log.content) : log.content}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p class="text-sm text-gray-500 text-center py-6">No entries recorded for this spotlight day.</p>
+                  )}
+                </div>
+
+                <div class="bg-zinc-950 border-t border-white/10 p-4 flex justify-between items-center">
+                  <span class="text-[10px] text-gray-500 uppercase tracking-widest font-mono">SPIN-DECRYPT SPOTLIGHT ENGINE v2.0</span>
+                  <button
+                    onClick={() => setSelectedSpotlightDay(null)}
+                    class="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-xs font-semibold text-white transition-all">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Global Footer */}
+          <footer class="mt-8 border-t border-white/5 pt-6 text-center">
+            <p class="text-xs text-gray-600">Split-Brain Portal Dashboard &copy; 2026. Designed for premium cognitive logging.</p>
+          </footer>
+
+        </div>
+      );
+    }
+
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+</html>
