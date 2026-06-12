@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Split-Brain Portal - Behavioral Cockpit</title>
-  <meta name="description" content="Split-Brain Portal is a personal behavioral cockpit and emotion matrix dashboard, providing real-time cognitive logs, emotion analysis, and entity tracking powered by Gemini and Groq (Llama) models, synced securely with Google Sheets.">
+  <meta name="description" content="Split-Brain Portal is a personal behavioral cockpit and emotion matrix dashboard, providing real-time cognitive logs, emotion analysis, and entity tracking powered by Gemini and Groq (Llama) models, synced securely with Supabase Vault.">
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React and ReactDOM -->
@@ -14,6 +14,15 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Inter & Outfit Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Supabase ESM Import Map -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.43.4/+esm"
+      }
+    }
+  </script>
   
   <style>
     body {
@@ -71,6 +80,7 @@
   <script type="text/babel" data-type="module">
     import { analyzeLogsWithGemini, askMyBrain, generateDeepInsights, classifyLogsEmotionGemini } from './LLMService.js?v=11';
     import { extractEntitiesWithOracle, askPulseWithGroq, classifyLogsEmotion } from './LLMService_Oracle.js?v=11';
+    import { supabase } from './supabaseClient.js';
 
     const { useState, useEffect, useRef, useMemo } = React;
 
@@ -341,19 +351,23 @@
     }
 
     function App() {
+      // 0. Supabase Auth States
+      const [session, setSession] = useState(null);
+      const [authEmail, setAuthEmail] = useState('');
+      const [authPassword, setAuthPassword] = useState('');
+      const [authLoading, setAuthLoading] = useState(false);
+      const [authError, setAuthError] = useState(null);
+      const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup'
+
       // 1. Navigation View State
       const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' | 'daily-pulse' | 'settings'
       
-      // 2. Configuration State (LocalStorage)
+      // 2. Configuration State (LocalStorage & Supabase profile)
       const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('sb_gemini_key') || '');
       const [groqApiKey, setGroqApiKey] = useState(() => localStorage.getItem('sb_groq_key') || '');
-      const [gasUrl, setGasUrl] = useState(() => localStorage.getItem('sb_gas_url') || '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]');
 
       // 3. Core Logs State
-      const [logs, setLogs] = useState(() => {
-        const stored = localStorage.getItem('splitbrain_logs_v3');
-        return stored ? JSON.parse(stored) : [];
-      });
+      const [logs, setLogs] = useState([]);
 
       // 4. Sheets Sync State
       const [isSyncingSheets, setIsSyncingSheets] = useState(false);
@@ -576,109 +590,117 @@
         };
       };
 
-      const fetchSheetsData = async (targetUrl = gasUrl) => {
-        if (!targetUrl || !targetUrl.trim() || targetUrl === '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]') {
-          setSheetsSyncError("Please configure a valid Google Sheets URL in settings.");
-          return;
-        }
+      // Fetch Logs from Supabase pulse_logs table
+      const fetchSupabaseLogs = async () => {
+        if (!session) return;
         setIsSyncingSheets(true);
         setSheetsSyncError(null);
+
         try {
-          const response = await fetch(targetUrl);
-          if (!response.ok) {
-            throw new Error(`HTTP Error: ${response.status}`);
-          }
-          
-          const contentType = response.headers.get("content-type") || "";
-          const text = await response.text();
-          
-          let data;
-          if (contentType.includes("application/json") || text.trim().startsWith("[") || text.trim().startsWith("{")) {
-            data = JSON.parse(text);
-          } else {
-            if (text.includes("<!DOCTYPE") || text.includes("<html") || text.includes("<div")) {
-              throw new Error("Apps Script URL returned HTML instead of JSON/CSV. Ensure the script is deployed as a Web App with access set to 'Anyone'.");
-            }
-            data = parseCSV(text);
-          }
+          const { data, error } = await supabase
+            .from('pulse_logs')
+            .select('*')
+            .eq('user_id', session.user.id)
+            .order('Date', { ascending: false });
 
-          console.log("Raw Sheets Data:", data);
-          console.log("Fetched data:", data);
+          if (error) throw error;
 
-          let logsArray = null;
-          if (Array.isArray(data)) {
-            logsArray = data;
-          } else if (data && typeof data === 'object') {
-            if (Array.isArray(data.logs)) {
-              logsArray = data.logs;
-            } else if (data.error) {
-              throw new Error(data.error);
-            } else {
-              const hasKeys = Object.keys(data).some(k => ['content', 'text', 'dominant_emotion', 'emotion', 'date', 'timestamp'].includes(k.toLowerCase().trim().replace(/[\s_]+/g, '')));
-              if (hasKeys) {
-                logsArray = [data];
-              }
-            }
-          }
+          if (data) {
+            const mappedLogs = data.map(row => ({
+              id: row.id,
+              date: row.Date || row.date || '',
+              stream: row.Stream_Type || row.stream_type || 'Journal',
+              content: row.Content || row.content || '',
+              dominant_emotion: row.Dominant_Emotion || row.dominant_emotion || 'Lazy',
+              timestamp: row.timestamp || row.created_at || ''
+            }));
+            setLogs(mappedLogs);
 
-          if (logsArray !== null) {
-            const normalized = logsArray
-              .map(log => normalizeLog(log))
-              .filter(log => log.content && log.content.trim() !== "");
-            
-            setLogs(normalized);
-
-            if (normalized.length === 0) {
+            if (mappedLogs.length === 0) {
               setOracleInsights(null);
               localStorage.removeItem('splitbrain_oracle_insights_v3');
             } else {
-              // Trigger batch emotion classification using Llama 3.3 or Gemini to analyze the full article contents
-              const triggerBatchClassification = async () => {
-                window.userTriggeredAIEvent = true; // allow AI calls
-                setIsClassifyingEmotions(true);
-                try {
-                  let classifications = [];
-                  if (groqApiKey && groqApiKey.trim()) {
-                    classifications = await classifyLogsEmotion(normalized, groqApiKey, activeCategories.map(c => c.name));
-                  } else if (geminiApiKey && geminiApiKey.trim()) {
-                    classifications = await classifyLogsEmotionGemini(normalized, geminiApiKey, activeCategories.map(c => c.name));
-                  }
+              // Trigger batch emotion classification if any emotions are default 'Lazy' or empty
+              const needsClassification = mappedLogs.some(l => !l.dominant_emotion || l.dominant_emotion === 'Lazy');
+              if (needsClassification) {
+                const triggerBatchClassification = async () => {
+                  window.userTriggeredAIEvent = true; // allow AI calls
+                  setIsClassifyingEmotions(true);
+                  try {
+                    let classifications = [];
+                    if (groqApiKey && groqApiKey.trim()) {
+                      classifications = await classifyLogsEmotion(mappedLogs, groqApiKey, activeCategories.map(c => c.name));
+                    } else if (geminiApiKey && geminiApiKey.trim()) {
+                      classifications = await classifyLogsEmotionGemini(mappedLogs, geminiApiKey, activeCategories.map(c => c.name));
+                    }
 
-                  if (classifications && classifications.length > 0) {
-                    const updatedLogs = [...normalized];
-                    classifications.forEach(c => {
-                      if (updatedLogs[c.index]) {
-                        updatedLogs[c.index].dominant_emotion = c.category;
+                    if (classifications && classifications.length > 0) {
+                      const updatedLogs = [...mappedLogs];
+                      for (const c of classifications) {
+                        if (updatedLogs[c.index]) {
+                          updatedLogs[c.index].dominant_emotion = c.category;
+                          // Update classified emotion in database
+                          await supabase
+                            .from('pulse_logs')
+                            .update({ Dominant_Emotion: c.category })
+                            .eq('id', updatedLogs[c.index].id);
+                        }
                       }
-                    });
-                    setLogs(updatedLogs);
-                    console.log("Successfully classified logs emotions: ", classifications);
+                      setLogs(updatedLogs);
+                      console.log("Successfully classified logs emotions: ", classifications);
+                    }
+                  } catch (e) {
+                    console.error("Batch emotion classification failed:", e);
+                  } finally {
+                    setIsClassifyingEmotions(false);
                   }
-                } catch (e) {
-                  console.error("Batch emotion classification failed:", e);
-                } finally {
-                  setIsClassifyingEmotions(false);
-                }
-              };
+                };
 
-              setTimeout(triggerBatchClassification, 200);
+                setTimeout(triggerBatchClassification, 200);
+              }
             }
-          } else {
-            throw new Error("Invalid response format from Apps Script");
           }
         } catch (err) {
-          console.error("Sheets synchronization error:", err);
+          console.error("Supabase sync error:", err);
           setSheetsSyncError(err.message);
         } finally {
           setIsSyncingSheets(false);
         }
       };
-      // Note: States moved to the top of the App component to resolve temporal dead zone issues.
 
-      // Save to localStorage when state changes
-      useEffect(() => {
-        localStorage.setItem('splitbrain_logs_v3', JSON.stringify(logs));
-      }, [logs]);
+      // Fetch User settings / API keys from Supabase profiles table
+      const fetchSupabaseProfile = async () => {
+        if (!session) return;
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (error && error.code !== 'PGRST116') { // PGRST116 is code for "no rows returned"
+            throw error;
+          }
+
+          if (data) {
+            if (data.gemini_api_key) {
+              setGeminiApiKey(data.gemini_api_key);
+              localStorage.setItem('sb_gemini_key', data.gemini_api_key);
+            }
+            if (data.groq_api_key) {
+              setGroqApiKey(data.groq_api_key);
+              localStorage.setItem('sb_groq_key', data.groq_api_key);
+            }
+          } else {
+            // Profile doesn't exist, create it dynamically
+            await supabase
+              .from('profiles')
+              .insert([{ id: session.user.id, updated_at: new Date().toISOString() }]);
+          }
+        } catch (err) {
+          console.warn("Gracefully bypassed profiles load. Settings table may not exist:", err);
+        }
+      };
 
       useEffect(() => {
         if (oracleInsights) {
@@ -686,11 +708,38 @@
         }
       }, [oracleInsights]);
 
+      // Supabase session listener
       useEffect(() => {
-        if (gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]') {
-          fetchSheetsData(gasUrl);
-        }
+        if (!supabase) return;
+        // Initial session check
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          setSession(session);
+        });
+
+        // Listen for updates
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+          setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
       }, []);
+
+      // Session trigger fetching
+      useEffect(() => {
+        if (!supabase) return;
+        if (session) {
+          fetchSupabaseLogs();
+          fetchSupabaseProfile();
+        } else {
+          setLogs([]);
+          setOracleInsights(null);
+          // Clear API keys on sign out to prevent leakage across users on the same device
+          setGeminiApiKey('');
+          setGroqApiKey('');
+          localStorage.removeItem('sb_gemini_key');
+          localStorage.removeItem('sb_groq_key');
+        }
+      }, [session]);
 
       // Category Resolver
       const resolveStateStyling = (emotionName) => {
@@ -793,61 +842,65 @@
           }
         }
 
-        const newLog = {
-          timestamp: getLocalTimestampStr(selectedPulseDate),
-          date: selectedPulseDate,
-          stream: 'Journal',
-          content: dailyPulseText,
-          dominant_emotion: resolvedEmotion
-        };
+        // Trigger Gemini categorization analysis if key is set
+        if (geminiApiKey.trim()) {
+          try {
+            const geminiResult = await analyzeLogsWithGemini(
+              `Analyze this journal log: "${dailyPulseText}". 
+              Categorize it into exactly one of these emotions: Focus, Anxiety, Burnout, Reflection, Lazy. 
+              Return ONLY the name of the emotion.`, 
+              geminiApiKey
+            );
+            if (geminiResult) {
+              const cleanedEmotion = geminiResult.trim().replace(/[^a-zA-Z]/g, '');
+              if (HSL_COLOR_PRESETS.some(p => p.name.toLowerCase() === cleanedEmotion.toLowerCase())) {
+                resolvedEmotion = cleanedEmotion.charAt(0).toUpperCase() + cleanedEmotion.slice(1).toLowerCase();
+              }
+            }
+          } catch (err) {
+            console.error("Gemini classification failed:", err);
+          }
+        }
 
         try {
-          // 1. Optional sync to Google Sheets
-          if (gasUrl.trim()) {
-            const resp = await fetch(gasUrl, {
-              method: 'POST',
-              mode: 'no-cors',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newLog)
-            });
-          }
+          const localDate = selectedPulseDate;
+          const textContent = dailyPulseText;
 
-          // 2. Append/Update local state logs
+          // Write directly to Supabase table pulse_logs
+          const { data, error } = await supabase
+            .from('pulse_logs')
+            .insert([{ 
+              user_id: session.user.id, 
+              Date: localDate, 
+              Stream_Type: 'Journal', 
+              Content: textContent,
+              Dominant_Emotion: resolvedEmotion
+            }])
+            .select();
+
+          if (error) throw error;
+
+          const newLog = {
+            id: data && data[0] ? data[0].id : Date.now().toString(),
+            date: localDate,
+            stream: 'Journal',
+            content: textContent,
+            dominant_emotion: resolvedEmotion,
+            timestamp: getLocalTimestampStr(localDate)
+          };
+
+          // Append/Update local state logs
           setLogs(prev => {
-            const filtered = prev.filter(l => l.date !== selectedPulseDate);
+            const filtered = prev.filter(l => l.date !== localDate);
             return [newLog, ...filtered];
           });
-
-          // 3. Trigger Gemini categorization analysis if key is set
-          if (geminiApiKey.trim()) {
-            try {
-              const geminiResult = await analyzeLogsWithGemini(
-                `Analyze this journal log: "${dailyPulseText}". 
-                Categorize it into exactly one of these emotions: Focus, Anxiety, Burnout, Reflection, Lazy. 
-                Return ONLY the name of the emotion.`, 
-                geminiApiKey
-              );
-              if (geminiResult) {
-                const cleanedEmotion = geminiResult.trim().replace(/[^a-zA-Z]/g, '');
-                if (HSL_COLOR_PRESETS.some(p => p.name.toLowerCase() === cleanedEmotion.toLowerCase())) {
-                  newLog.dominant_emotion = cleanedEmotion.charAt(0).toUpperCase() + cleanedEmotion.slice(1).toLowerCase();
-                  setLogs(prev => {
-                    const filtered = prev.filter(l => l.date !== selectedPulseDate);
-                    return [newLog, ...filtered];
-                  });
-                }
-              }
-            } catch (err) {
-              console.error("Gemini classification failed:", err);
-            }
-          }
 
           setDailyPulseText('');
           setSelectedPulseDate(getLocalTodayStr());
           setDailyPulseStatus('success');
           setTimeout(() => setDailyPulseStatus('idle'), 3000);
         } catch (e) {
-          console.error("Failed synchronization:", e);
+          console.error("Failed Supabase synchronization:", e);
           setDailyPulseStatus('error');
           setTimeout(() => setDailyPulseStatus('idle'), 4000);
         }
@@ -929,15 +982,230 @@
       };
 
       // Save Settings
-      const saveSettings = () => {
+      const saveSettings = async () => {
         localStorage.setItem('sb_gemini_key', geminiApiKey);
         localStorage.setItem('sb_groq_key', groqApiKey);
-        localStorage.setItem('sb_gas_url', gasUrl);
-        alert("Settings synchronized successfully.");
-        if (gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]') {
-          fetchSheetsData(gasUrl);
+        
+        if (session) {
+          try {
+            const { error } = await supabase
+              .from('profiles')
+              .upsert({
+                id: session.user.id,
+                gemini_api_key: geminiApiKey,
+                groq_api_key: groqApiKey,
+                updated_at: new Date().toISOString()
+              });
+            if (error) throw error;
+            alert("Settings synchronized to cloud vault!");
+          } catch (err) {
+            console.warn("Failed to sync settings to Supabase profiles:", err);
+            alert("Local settings saved. (Profiles sync failed or table missing).");
+          }
+        } else {
+          alert("Settings synchronized successfully locally.");
         }
       };
+
+      if (!supabase) {
+        return (
+          <div class="min-h-screen flex items-center justify-center p-4 relative z-10">
+            <div class="w-full max-w-lg bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+              <div class="absolute top-0 right-0 w-[150px] h-[150px] rounded-full bg-amber-500/10 blur-[40px] pointer-events-none"></div>
+              
+              <div class="flex flex-col items-center mb-6">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20 mb-4 animate-pulse">
+                  <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h2 class="text-2xl font-black text-white tracking-tight text-center font-display uppercase">
+                  Configuration Required
+                </h2>
+                <p class="text-xs text-amber-400 mt-1 uppercase tracking-wider font-semibold font-mono">
+                  Supabase Vault Setup
+                </p>
+              </div>
+
+              <div class="space-y-4 text-gray-300 text-sm leading-relaxed">
+                <p>
+                  We have migrated the backend storage from Google Sheets to **Supabase** for secure authentication and database logs, but your credentials are not yet configured.
+                </p>
+                <div class="bg-black/40 border border-white/5 rounded-xl p-4 font-mono text-xs space-y-2 text-gray-400">
+                  <p class="text-white font-bold mb-1">To connect your vault:</p>
+                  <p>1. Open the file:</p>
+                  <p class="text-cyan-400 select-all font-semibold">C:\Users\muham_cqs\.gemini\antigravity\scratch\split-brain-portal\supabaseClient.js</p>
+                  <p>2. Replace <span class="text-yellow-500 font-semibold">'YOUR_SUPABASE_URL'</span> and <span class="text-yellow-500 font-semibold">'YOUR_SUPABASE_ANON_KEY'</span> with your actual Supabase project keys.</p>
+                  <p>3. Save the file and reload this page.</p>
+                </div>
+                <p class="text-xs text-gray-500 text-center pt-2">
+                  Once your credentials are added, the secure glassmorphic vault interface will lock and manage your behavioral data.
+                </p>
+              </div>
+
+              <div class="mt-6 border-t border-white/5 pt-4 flex justify-center">
+                <button
+                  onClick={() => window.location.reload()}
+                  class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-orange-500/10 flex items-center gap-2 text-xs"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
+                  </svg>
+                  Check Connection & Reload
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      if (!session) {
+        return (
+          <div class="min-h-screen flex items-center justify-center p-4 relative z-10">
+            <div class="w-full max-w-md bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+              <div class="flex flex-col items-center mb-6">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-400 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 mb-3">
+                  <span class="font-display font-black text-xl text-white">S</span>
+                </div>
+                <h2 class="text-2xl font-black text-white tracking-tight text-center font-display">
+                  SPLIT-BRAIN VAULT
+                </h2>
+                <p class="text-[10px] text-gray-400 mt-1 uppercase tracking-wider font-semibold font-mono">
+                  {authMode === 'login' ? 'Enter secure vault' : 'Create new secure vault'}
+                </p>
+              </div>
+
+              {authError && (
+                <div class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl p-4 mb-4">
+                  {authError}
+                </div>
+              )}
+
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">Email Address</label>
+                  <input
+                    type="email"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="name@domain.com"
+                    class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">Password</label>
+                  <input
+                    type="password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="••••••••"
+                    class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
+                  />
+                </div>
+
+                <div class="pt-2">
+                  {authMode === 'login' ? (
+                    <button
+                      onClick={async () => {
+                        setAuthLoading(true);
+                        setAuthError(null);
+                        try {
+                          const { error } = await supabase.auth.signInWithPassword({
+                            email: authEmail,
+                            password: authPassword,
+                          });
+                          if (error) throw error;
+                        } catch (err) {
+                          setAuthError(err.message);
+                        } finally {
+                          setAuthLoading(false);
+                        }
+                      }}
+                      disabled={authLoading || !authEmail || !authPassword}
+                      class="w-full bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/10 flex items-center justify-center gap-2"
+                    >
+                      {authLoading ? <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Sign In'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        setAuthLoading(true);
+                        setAuthError(null);
+                        try {
+                          const { error } = await supabase.auth.signUp({
+                            email: authEmail,
+                            password: authPassword,
+                          });
+                          if (error) throw error;
+                          alert("Vault registration complete! Please check your email for confirmation, or try signing in.");
+                          setAuthMode('login');
+                        } catch (err) {
+                          setAuthError(err.message);
+                        } finally {
+                          setAuthLoading(false);
+                        }
+                      }}
+                      disabled={authLoading || !authEmail || !authPassword}
+                      class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-pink-500/10 flex items-center justify-center gap-2"
+                    >
+                      {authLoading ? <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Create Vault'}
+                    </button>
+                  )}
+                </div>
+
+                <div class="relative flex items-center justify-center py-2">
+                  <div class="absolute inset-0 flex items-center">
+                    <div class="w-full border-t border-white/5"></div>
+                  </div>
+                  <span class="relative bg-zinc-950 px-3 text-[10px] uppercase font-bold text-gray-500 font-mono tracking-wider z-10">
+                    or
+                  </span>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    setAuthLoading(true);
+                    setAuthError(null);
+                    try {
+                      const { error } = await supabase.auth.signInWithOAuth({
+                        provider: 'google',
+                        options: {
+                          redirectTo: window.location.origin + window.location.pathname
+                        }
+                      });
+                      if (error) throw error;
+                    } catch (err) {
+                      setAuthError(err.message);
+                    } finally {
+                      setAuthLoading(false);
+                    }
+                  }}
+                  disabled={authLoading}
+                  class="w-full bg-white/5 border border-white/10 hover:bg-white/15 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2.5 text-xs shadow-md"
+                >
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.513 0-6.386-2.87-6.386-6.385s2.87-6.386 6.386-6.386c1.543 0 2.957.557 4.05 1.5l3.15-3.15C19.26 2.228 15.937 1 12.24 1 6.042 1 1 6.042 1 12.24s5.042 11.24 11.24 11.24c6.386 0 11.24-5.042 11.24-11.24 0-.771-.086-1.5-.24-2.185H12.24z"/>
+                  </svg>
+                  Continue with Google
+                </button>
+              </div>
+
+              <div class="mt-6 border-t border-white/5 pt-4 text-center">
+                <button
+                  onClick={() => {
+                    setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                    setAuthError(null);
+                  }}
+                  class="text-xs text-gray-400 hover:text-white transition-all font-medium"
+                >
+                  {authMode === 'login' ? "Don't have a vault? Create one" : "Already have a vault? Sign In"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
 
       return (
         <div class="min-h-screen flex flex-col max-w-7xl mx-auto p-4 md:p-6 pb-28 relative z-10">
@@ -957,9 +1225,9 @@
             </div>
 
             <div class="flex items-center gap-2 px-3 py-1.5 bg-white/[0.02] border border-white/5 rounded-full backdrop-blur-md">
-              <span class={`w-2.5 h-2.5 rounded-full ${gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
-              <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                {gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]' ? 'Cloud Sync Active' : 'Offline Mode'}
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider font-mono">
+                Vault Active
               </span>
             </div>
           </header>
@@ -983,10 +1251,10 @@
                           VIVID EMOTIONAL MATRIX
                           {isClassifyingEmotions && <span class="text-xs text-purple-400 font-medium animate-pulse ml-1">(Classifying emotions...)</span>}
                           <button
-                            onClick={() => fetchSheetsData()}
+                            onClick={() => fetchSupabaseLogs()}
                             disabled={isSyncingSheets || isClassifyingEmotions}
                             class="ml-2 p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all disabled:opacity-50 flex items-center justify-center border border-transparent hover:border-white/10"
-                            title="Sync logs from Google Sheets">
+                            title="Refresh Vault logs">
                             <svg class={`w-4 h-4 ${isSyncingSheets ? 'animate-spin text-cyan-400' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
                             </svg>
@@ -1047,7 +1315,7 @@
                     {isSyncingSheets && (
                       <div class="text-center py-8 border border-white/5 rounded-xl bg-white/[0.01]">
                         <span class="w-6 h-6 border-2 border-white/20 border-t-cyan-400 rounded-full animate-spin inline-block mb-2"></span>
-                        <p class="text-xs text-gray-400">Syncing log entries from Google Sheets...</p>
+                        <p class="text-xs text-gray-400">Syncing logs with cloud vault...</p>
                       </div>
                     )}
 
@@ -1056,14 +1324,9 @@
                         <p class="text-xs text-red-400">Sync Error: {sheetsSyncError}</p>
                         <div class="flex gap-2 justify-center mt-2">
                           <button
-                            onClick={() => fetchSheetsData()}
+                            onClick={() => fetchSupabaseLogs()}
                             class="text-[10px] px-3 py-1 bg-red-500/10 border border-red-500/20 text-red-400 font-semibold rounded-lg hover:bg-red-500/20 transition-all">
-                            Retry Pull
-                          </button>
-                          <button
-                            onClick={() => fetchSheetsData()}
-                            class="text-[10px] px-3 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 font-semibold rounded-lg hover:bg-purple-500/20 transition-all">
-                            Force Sheet Sync
+                            Retry Sync
                           </button>
                         </div>
                       </div>
@@ -1071,25 +1334,14 @@
 
                     {logs.length === 0 && !isSyncingSheets && !sheetsSyncError && (
                       <div class="text-center py-8 border border-dashed border-white/10 rounded-xl bg-white/[0.01] mt-2">
-                        <p class="text-sm text-gray-500 mb-2">No synchronized logs found in memory.</p>
-                        {gasUrl && gasUrl !== '[PASTE_YOUR_NEW_WEB_APP_URL_HERE]' ? (
-                          <div class="flex gap-2.5 justify-center">
-                            <button
-                              onClick={() => fetchSheetsData()}
-                              class="text-xs px-3.5 py-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-semibold rounded-lg hover:bg-cyan-500/20 transition-all">
-                              Pull logs from Google Sheets
-                            </button>
-                            <button
-                              onClick={() => fetchSheetsData()}
-                              class="text-xs px-3.5 py-1.5 bg-purple-500/10 border border-purple-500/30 text-purple-400 font-semibold rounded-lg hover:bg-purple-500/20 transition-all">
-                              Force Sheet Sync
-                            </button>
-                          </div>
-                        ) : (
-                          <p class="text-xs text-purple-400">
-                            Configure your Google Sheets URL in <button onClick={() => setCurrentView('settings')} class="underline hover:text-purple-300 font-bold">Settings</button> to sync logs.
-                          </p>
-                        )}
+                        <p class="text-sm text-gray-500 mb-2">No cognitive logs found in your cloud vault.</p>
+                        <div class="flex gap-2.5 justify-center">
+                          <button
+                            onClick={() => fetchSupabaseLogs()}
+                            class="text-xs px-3.5 py-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-semibold rounded-lg hover:bg-cyan-500/20 transition-all">
+                            Refresh Vault Logs
+                          </button>
+                        </div>
                       </div>
                     )}
                   </section>
@@ -1384,7 +1636,7 @@
                           <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                           Saving Daily Log...
                         </>
-                      ) : 'Push Daily Log to Sheets'}
+                      ) : 'Push Daily Log to Vault'}
                     </button>
                   </div>
                 </div>
@@ -1419,7 +1671,7 @@
                   </svg>
                   ENGINE CONFIGURATION
                 </h2>
-                <p class="text-sm text-gray-400 mb-6">Manage API credential endpoints and local configuration mapping rules.</p>
+                <p class="text-sm text-gray-400 mb-6 font-medium">Manage API credentials and secure cloud cognitive sessions.</p>
 
                 <div class="flex flex-col gap-5">
                   <div>
@@ -1443,16 +1695,6 @@
                       class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500 transition-all font-mono"
                     />
                   </div>
-                  <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Google Sheets Web App Integration URL</label>
-                    <input 
-                      type="text" 
-                      value={gasUrl}
-                      onChange={(e) => setGasUrl(e.target.value)}
-                      placeholder="https://script.google.com/macros/s/.../exec" 
-                      class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500 transition-all"
-                    />
-                  </div>
 
                   <div class="flex flex-col sm:flex-row gap-3 mt-4">
                     <button
@@ -1460,236 +1702,43 @@
                       class="flex-grow bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/10">
                       Sync Configuration Settings
                     </button>
-                    <button
-                      onClick={() => fetchSheetsData()}
-                      class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-lg shadow-purple-500/10">
-                      Force Sheet Sync
-                    </button>
                   </div>
 
-                  {/* Google Sheets Integration Guide Card */}
+                  {/* Supabase Vault Connection Info Card */}
                   <div class="mt-8 border-t border-white/10 pt-6">
                     <h3 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                      <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                       </svg>
-                      Google Sheets Integration Guide
+                      Vault Cloud Session
                     </h3>
-                    <p class="text-xs text-gray-400 mb-4">Follow these simple steps to link your personal Google Sheet to this portal:</p>
+                    <p class="text-xs text-gray-400 mb-4 font-medium">You are authenticated via Supabase. Your cognitive logs are encrypted and stored securely in your private cloud vault.</p>
                     
-                    <div class="space-y-3.5 text-xs text-gray-300">
-                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
-                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">1</span>
+                    <div class="bg-black/30 border border-white/5 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-purple-500/10 flex items-center justify-center border border-purple-500/20 text-purple-400 font-bold">
+                          {session && session.user && session.user.email ? session.user.email.charAt(0).toUpperCase() : 'U'}
+                        </div>
                         <div>
-                          <p class="font-bold text-white mb-0.5">Create a Google Sheet</p>
-                          <p class="text-gray-400">Go to your Google Drive, create a new spreadsheet, and add any column headers you like (e.g. <code>Date</code>, <code>Stream</code>, <code>Content</code>).</p>
+                          <p class="text-xs font-bold text-white leading-none mb-1">Authenticated Account</p>
+                          <p class="text-[11px] text-gray-500 font-mono">{session && session.user ? session.user.email : ''}</p>
                         </div>
                       </div>
 
-                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
-                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">2</span>
-                        <div>
-                          <p class="font-bold text-white mb-0.5">Open Apps Script Editor</p>
-                          <p class="text-gray-400">In the top menu of your Google Sheet, click on <strong>Extensions</strong> &rarr; <strong>Apps Script</strong>. This opens the script editor tab.</p>
-                        </div>
-                      </div>
-
-                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
-                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">3</span>
-                        <div>
-                          <p class="font-bold text-white mb-0.5">Paste Code & Save</p>
-                          <p class="text-gray-400 mb-3">Delete any code already in the editor, and paste the code from <code>google-apps-script.js</code>. Click the floppy disk icon to save.</p>
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(`/**
- * google-apps-script.js
- * 
- * Google Apps Script Web App receiver for Split-Brain Portal.
- * Deploy this script as a Web App in Google Sheets with "Execute as: Me" and "Who has access: Anyone".
- */
-
-function doPost(e) {
-  try {
-    const jsonString = e.postData.contents;
-    const payload = JSON.parse(jsonString);
-    
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = spreadsheet.getSheetByName("SplitBrainLogs") || spreadsheet.getSheets()[0];
-    if (!sheet) {
-      sheet = spreadsheet.insertSheet("SplitBrainLogs");
-      sheet.appendRow(["Timestamp", "Date", "Stream", "Content", "Dominant Emotion", "AES Shield Masked"]);
-      
-      // Style headers
-      sheet.getRange(1, 1, 1, 6)
-        .setFontWeight("bold")
-        .setBackground("#111111")
-        .setFontColor("#ffffff")
-        .setHorizontalAlignment("center");
-    }
-    
-    const logs = Array.isArray(payload) ? payload : [payload];
-    const rows = sheet.getDataRange().getValues();
-    let headers = [];
-    if (rows.length > 0) {
-      headers = rows[0].map(h => String(h).toLowerCase().trim().replace(/[\s_]+/g, ''));
-    }
-    
-    if (headers.length === 0) {
-      sheet.appendRow(["Timestamp", "Date", "Stream", "Content", "Dominant Emotion", "AES Shield Masked"]);
-      headers = ["timestamp", "date", "stream", "content", "dominantemotion", "aesshieldmasked"];
-    }
-    
-    const getColIndex = (keys) => {
-      for (const key of keys) {
-        const normalizedKey = key.toLowerCase().replace(/[\s_]+/g, '');
-        const idx = headers.indexOf(normalizedKey);
-        if (idx !== -1) return idx;
-      }
-      return -1;
-    };
-    
-    const tsIdx = getColIndex(['timestamp', 'time']);
-    const dateIdx = getColIndex(['date']);
-    const streamIdx = getColIndex(['stream', 'streamtype', 'stream_type', 'category', 'type']);
-    const contentIdx = getColIndex(['content', 'text', 'journal', 'entry', 'log']);
-    const emotionIdx = getColIndex(['dominantemotion', 'dominant_emotion', 'emotion', 'state']);
-    const maskedIdx = getColIndex(['aesshieldmasked', 'aes_shield_masked', 'masked']);
-    
-    for (const log of logs) {
-      const isMasked = (log.content && log.content.includes("[") && log.content.includes("]")) ? "YES" : "NO";
-      
-      const timestampVal = log.timestamp || new Date().toISOString();
-      let dateVal = log.date || log.timestamp || new Date().toLocaleDateString();
-      const streamVal = log.stream || "Journal";
-      const contentVal = log.content || "";
-      const emotionVal = log.dominant_emotion || log.emotion || "Balanced";
-      const maskedVal = isMasked;
-      
-      // If the sheet has no separate "Timestamp" or "Time" column, write the full timestampVal directly to the Date column!
-      if (tsIdx === -1) {
-        dateVal = timestampVal;
-      }
-      
-      const rowData = new Array(headers.length).fill("");
-      
-      if (tsIdx !== -1) rowData[tsIdx] = timestampVal;
-      if (dateIdx !== -1) rowData[dateIdx] = dateVal;
-      if (streamIdx !== -1) rowData[streamIdx] = streamVal;
-      if (contentIdx !== -1) rowData[contentIdx] = contentVal;
-      if (emotionIdx !== -1) rowData[emotionIdx] = emotionVal;
-      if (maskedIdx !== -1) rowData[maskedIdx] = maskedVal;
-      
-      if (tsIdx === -1 && dateIdx === -1 && streamIdx === -1) {
-        sheet.appendRow([timestampVal, dateVal, streamVal, contentVal, emotionVal, maskedVal]);
-      } else {
-        sheet.appendRow(rowData);
-      }
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      success: true,
-      message: \`\${logs.length} log(s) synchronized successfully.\`
-    })).setMimeType(ContentService.MimeType.JSON);
-    
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({
-      success: false,
-      error: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doGet(e) {
-  try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = spreadsheet.getSheetByName("SplitBrainLogs") || spreadsheet.getSheets()[0];
-    if (!sheet) {
-      return ContentService.createTextOutput(JSON.stringify([]))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    const rows = sheet.getDataRange().getValues();
-    if (rows.length <= 1) {
-      return ContentService.createTextOutput(JSON.stringify([]))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    const headers = rows[0].map(h => String(h).toLowerCase().trim().replace(/[\s_]+/g, ''));
-    
-    const getColIndex = (keys) => {
-      for (const key of keys) {
-        const normalizedKey = key.toLowerCase().replace(/[\s_]+/g, '');
-        const idx = headers.indexOf(normalizedKey);
-        if (idx !== -1) return idx;
-      }
-      return -1;
-    };
-    
-    const tsIdx = getColIndex(['timestamp', 'time']);
-    const dateIdx = getColIndex(['date']);
-    const streamIdx = getColIndex(['stream', 'streamtype', 'stream_type', 'category', 'type']);
-    const contentIdx = getColIndex(['content', 'text', 'journal', 'entry', 'log']);
-    const emotionIdx = getColIndex(['dominantemotion', 'dominant_emotion', 'emotion', 'state']);
-    const maskedIdx = getColIndex(['aesshieldmasked', 'aes_shield_masked', 'masked']);
-    
-    const logs = [];
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      
-      const timestampVal = tsIdx !== -1 ? row[tsIdx] : row[0];
-      const dateVal = dateIdx !== -1 ? row[dateIdx] : (tsIdx !== -1 ? row[tsIdx] : row[0]);
-      const streamVal = streamIdx !== -1 ? row[streamIdx] : (row.length > 2 ? row[1] : "Journal");
-      const contentVal = contentIdx !== -1 ? row[contentIdx] : (row.length > 2 ? row[2] : row[1]);
-      const emotionVal = emotionIdx !== -1 ? row[emotionIdx] : "Balanced";
-      const maskedVal = maskedIdx !== -1 ? row[maskedIdx] : "NO";
-      
-      logs.push({
-        timestamp: timestampVal,
-        date: dateVal,
-        stream: streamVal,
-        content: contentVal,
-        dominant_emotion: emotionVal,
-        aes_shield_masked: maskedVal
-      });
-    }
-    
-    logs.sort((a, b) => new Date(b.date || b.timestamp) - new Date(a.date || a.timestamp));
-    
-    return ContentService.createTextOutput(JSON.stringify(logs))
-      .setMimeType(ContentService.MimeType.JSON);
-      
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({
-      success: false,
-      error: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}`);
-                              alert("Apps Script code copied to clipboard!");
-                            }}
-                            class="px-3 py-1.5 bg-green-500/10 border border-green-500/20 text-green-400 font-bold rounded-lg hover:bg-green-500/20 transition-all">
-                            Copy Apps Script Code
-                          </button>
-                        </div>
-                      </div>
-
-                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
-                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">4</span>
-                        <div>
-                          <p class="font-bold text-white mb-0.5">Deploy as Web App</p>
-                          <p class="text-gray-400">Click <strong>Deploy</strong> (top right) &rarr; <strong>New deployment</strong>. Set <i>Execute as</i> to <strong>"Me"</strong> and <i>Who has access</i> to <strong>"Anyone"</strong>, then click <strong>Deploy</strong>.</p>
-                        </div>
-                      </div>
-
-                      <div class="flex gap-3 bg-white/[0.01] border border-white/5 rounded-xl p-3">
-                        <span class="w-5 h-5 rounded-full bg-green-500/10 text-green-400 font-bold flex items-center justify-center shrink-0">5</span>
-                        <div>
-                          <p class="font-bold text-white mb-0.5">Link Web App URL</p>
-                          <p class="text-gray-400">Copy the generated Web App URL, paste it into the <i>Google Sheets Web App Integration URL</i> field above, and click <strong>Sync Configuration Settings</strong>.</p>
-                        </div>
-                      </div>
+                      <button
+                        onClick={async () => {
+                          await supabase.auth.signOut();
+                        }}
+                        class="px-4 py-2 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 text-xs font-bold rounded-xl transition-all flex items-center gap-2"
+                      >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                        Lock Vault / Sign Out
+                      </button>
                     </div>
                   </div>
+
                 </div>
               </div>
             )}
