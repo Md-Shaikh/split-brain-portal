@@ -11,7 +11,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <!-- Babel -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
   <!-- Inter & Outfit Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   
@@ -78,6 +78,7 @@
 
   <!-- React Babel Application -->
   <script type="text/babel" data-type="module">
+    /* @jsxRuntime classic */
     import { analyzeLogsWithGemini, askMyBrain, generateDeepInsights, classifyLogsEmotionGemini } from './LLMService.js?v=11';
     import { extractEntitiesWithOracle, askPulseWithGroq, classifyLogsEmotion } from './LLMService_Oracle.js?v=11';
     import { supabase } from './supabaseClient.js';
@@ -365,6 +366,7 @@
       // 2. Configuration State (LocalStorage & Supabase profile)
       const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('sb_gemini_key') || '');
       const [groqApiKey, setGroqApiKey] = useState(() => localStorage.getItem('sb_groq_key') || '');
+      const [aiCallsToday, setAiCallsToday] = useState(0);
 
       // 3. Core Logs State
       const [logs, setLogs] = useState([]);
@@ -691,6 +693,14 @@
               setGroqApiKey(data.groq_api_key);
               localStorage.setItem('sb_groq_key', data.groq_api_key);
             }
+            if (data.ai_calls_today !== undefined) {
+              const todayStr = getLocalTodayStr();
+              if (data.last_active_date !== todayStr) {
+                setAiCallsToday(0);
+              } else {
+                setAiCallsToday(data.ai_calls_today);
+              }
+            }
           } else {
             // Profile doesn't exist, create it dynamically
             await supabase
@@ -842,23 +852,48 @@
           }
         }
 
-        // Trigger Gemini categorization analysis if key is set
-        if (geminiApiKey.trim()) {
-          try {
-            const geminiResult = await analyzeLogsWithGemini(
-              `Analyze this journal log: "${dailyPulseText}". 
-              Categorize it into exactly one of these emotions: Focus, Anxiety, Burnout, Reflection, Lazy. 
-              Return ONLY the name of the emotion.`, 
-              geminiApiKey
-            );
-            if (geminiResult) {
-              const cleanedEmotion = geminiResult.trim().replace(/[^a-zA-Z]/g, '');
-              if (HSL_COLOR_PRESETS.some(p => p.name.toLowerCase() === cleanedEmotion.toLowerCase())) {
-                resolvedEmotion = cleanedEmotion.charAt(0).toUpperCase() + cleanedEmotion.slice(1).toLowerCase();
-              }
+        // 1. Trigger Edge Function classification analysis (Strategy A & C, Keyless)
+        try {
+          const { data: edgeRes, error: edgeErr } = await supabase.functions.invoke('ai-insights', {
+            body: { 
+              action: 'classify-emotion', 
+              payload: { 
+                prompt: `Analyze this journal log: "${dailyPulseText}". 
+                Categorize it into exactly one of these emotions: Focus, Anxiety, Burnout, Reflection, Lazy. 
+                Return ONLY the name of the emotion.`
+              } 
             }
-          } catch (err) {
-            console.error("Gemini classification failed:", err);
+          });
+          if (edgeErr) throw edgeErr;
+          if (edgeRes && edgeRes.result) {
+            const cleanedEmotion = edgeRes.result.trim().replace(/[^a-zA-Z]/g, '');
+            if (HSL_COLOR_PRESETS.some(p => p.name.toLowerCase() === cleanedEmotion.toLowerCase())) {
+              resolvedEmotion = cleanedEmotion.charAt(0).toUpperCase() + cleanedEmotion.slice(1).toLowerCase();
+            }
+            if (edgeRes.ai_calls_today !== undefined) {
+              setAiCallsToday(edgeRes.ai_calls_today);
+            }
+          }
+        } catch (err) {
+          console.warn("Edge Function classification failed, trying local key fallback:", err);
+          // Fallback to client-side Gemini API call if user has local key configured
+          if (geminiApiKey.trim()) {
+            try {
+              const geminiResult = await analyzeLogsWithGemini(
+                `Analyze this journal log: "${dailyPulseText}". 
+                Categorize it into exactly one of these emotions: Focus, Anxiety, Burnout, Reflection, Lazy. 
+                Return ONLY the name of the emotion.`, 
+                geminiApiKey
+              );
+              if (geminiResult) {
+                const cleanedEmotion = geminiResult.trim().replace(/[^a-zA-Z]/g, '');
+                if (HSL_COLOR_PRESETS.some(p => p.name.toLowerCase() === cleanedEmotion.toLowerCase())) {
+                  resolvedEmotion = cleanedEmotion.charAt(0).toUpperCase() + cleanedEmotion.slice(1).toLowerCase();
+                }
+              }
+            } catch (fallbackErr) {
+              console.error("Client Gemini classification failed:", fallbackErr);
+            }
           }
         }
 
@@ -891,7 +926,7 @@
 
           // Append/Update local state logs
           setLogs(prev => {
-            const filtered = prev.filter(l => l.date !== localDate);
+            const filtered = prev.filter(l => l.id !== newLog.id);
             return [newLog, ...filtered];
           });
 
@@ -913,44 +948,112 @@
         setAskResponse(null);
         window.userTriggeredAIEvent = true;
 
-        if (!groqApiKey.trim()) {
-          // Groq key is offline, use local search fallback immediately
-          executeLocalSearchFallback(`Groq Key missing.`);
-          return;
-        }
-
         const safeLogs = Array.isArray(logs) ? logs : [];
+        const formattedPayload = safeLogs.map(l => `[${l.Date || l.date || 'Unknown Date'}]: ${l.Content || l.content || ''}`).join('\n');
 
+        // 1. Try invoking Supabase Edge Function first (Strategy A & C, Keyless)
         try {
-          console.log("PAYLOAD AUDIT - Sending to Groq:", JSON.stringify(safeLogs, null, 2));
-          const formattedPayload = safeLogs.map(l => `[${l.Date || l.date || 'Unknown Date'}]: ${l.Content || l.content || ''}`).join('\n');
-          const result = await askPulseWithGroq(askQuery, formattedPayload, groqApiKey);
-          if (result && result.answer) {
-            setAskResponse({
-              answer: result.answer,
-              sources: result.sources || []
+          const { data: edgeRes, error: edgeErr } = await supabase.functions.invoke('ai-insights', {
+            body: {
+              action: 'ask-pulse',
+              payload: {
+                prompt: askQuery,
+                logsContext: formattedPayload
+              }
+            }
+          });
+          if (edgeErr) throw edgeErr;
+          if (edgeRes && edgeRes.result) {
+            // Find matched source logs locally by matching keywords in query
+            const stopWords = new Set(['when', 'what', 'where', 'feel', 'feeling', 'about', 'this', 'that', 'with', 'have', 'were', 'your', 'from', 'then', 'than', 'some', 'more', 'how', 'did', 'does']);
+            const queryWords = askQuery.toLowerCase()
+              .replace(/[^a-z0-9\s]/g, '')
+              .split(/\s+/)
+              .filter(w => w.length > 2 && !stopWords.has(w));
+            
+            const matches = safeLogs.filter(l => {
+              const content = (l.content || l.Content || '').toLowerCase();
+              if (queryWords.length > 0) {
+                return queryWords.some(word => content.includes(word));
+              }
+              return content.includes(askQuery.toLowerCase());
             });
-          } else {
-            throw new Error("Invalid API Response format");
+            const matchedIds = matches.slice(0, 4).map(m => m.id);
+
+            setAskResponse({
+              answer: edgeRes.result.answer,
+              sources: matchedIds
+            });
+            if (edgeRes.ai_calls_today !== undefined) {
+              setAiCallsToday(edgeRes.ai_calls_today);
+            }
+            setAskLoading(false);
+            return;
           }
         } catch (err) {
-          console.warn("Groq Oracle Q&A failed, falling back to local memory index:", err);
-          executeLocalSearchFallback(err.message);
-        } finally {
-          setAskLoading(false);
+          console.warn("Edge Function Q&A failed, trying client key fallback:", err);
         }
+
+        // 2. Fallback to client-side Groq API call if user has local key configured
+        if (groqApiKey.trim()) {
+          try {
+            console.log("PAYLOAD AUDIT - Sending to Groq:", JSON.stringify(safeLogs, null, 2));
+            const result = await askPulseWithGroq(askQuery, formattedPayload, groqApiKey);
+            if (result && result.answer) {
+              // Find matched source logs locally
+              const stopWords = new Set(['when', 'what', 'where', 'feel', 'feeling', 'about', 'this', 'that', 'with', 'have', 'were', 'your', 'from', 'then', 'than', 'some', 'more', 'how', 'did', 'does']);
+              const queryWords = askQuery.toLowerCase()
+                .replace(/[^a-z0-9\s]/g, '')
+                .split(/\s+/)
+                .filter(w => w.length > 2 && !stopWords.has(w));
+              
+              const matches = safeLogs.filter(l => {
+                const content = (l.content || l.Content || '').toLowerCase();
+                if (queryWords.length > 0) {
+                  return queryWords.some(word => content.includes(word));
+                }
+                return content.includes(askQuery.toLowerCase());
+              });
+              const matchedIds = matches.slice(0, 4).map(m => m.id);
+
+              setAskResponse({
+                answer: result.answer,
+                sources: matchedIds
+              });
+              setAskLoading(false);
+              return;
+            }
+          } catch (err) {
+            console.warn("Client Groq Oracle Q&A failed, falling back to local memory index:", err);
+          }
+        }
+
+        // 3. Complete offline fallback
+        executeLocalSearchFallback("AI Offline");
+        setAskLoading(false);
       };
 
       // Local search fallback implementation
       const executeLocalSearchFallback = (errReason) => {
         const safeLogs = Array.isArray(logs) ? logs : [];
-        const query = askQuery.toLowerCase();
-        const matches = safeLogs.filter(l => (l.content || l.Content || '').toLowerCase().includes(query));
-        const matchedDates = matches.map(m => m.date || m.Date || 'Unknown Date');
+        const stopWords = new Set(['when', 'what', 'where', 'feel', 'feeling', 'about', 'this', 'that', 'with', 'have', 'were', 'your', 'from', 'then', 'than', 'some', 'more', 'how', 'did', 'does']);
+        const queryWords = askQuery.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .split(/\s+/)
+          .filter(w => w.length > 2 && !stopWords.has(w));
+        
+        const matches = safeLogs.filter(l => {
+          const content = (l.content || l.Content || '').toLowerCase();
+          if (queryWords.length > 0) {
+            return queryWords.some(word => content.includes(word));
+          }
+          return content.includes(askQuery.toLowerCase());
+        });
+        const matchedIds = matches.slice(0, 4).map(m => m.id);
 
         setAskResponse({
           answer: `AI Offline. Found ${matches.length} local matches.`,
-          sources: matchedDates,
+          sources: matchedIds,
           isFallback: true
         });
       };
@@ -962,23 +1065,59 @@
           localStorage.removeItem('splitbrain_oracle_insights_v3');
           return;
         }
-        if (!groqApiKey.trim()) {
-          alert("Configure a valid Groq API Key in settings first.");
-          return;
-        }
         setIsSyncingOracle(true);
         window.userTriggeredAIEvent = true;
 
+        const promptPayload = `Analyze these logs: ${JSON.stringify(logs)}. 
+        Identify entities (people, products, websites, software, projects). 
+        Extract dominant topics, trends, daily summary, uncomfortable truths, and golden patterns. 
+        Return ONLY a JSON object with: 
+        {
+          "dominant_emotion": "EmotionName",
+          "daily_summary": "Slightly detailed summary of trends",
+          "uncomfortableTruth": "brutally honest feedback",
+          "goldenPattern": "constructive behavior insight",
+          "recurring_topics": ["TopicA", "TopicB"],
+          "extracted_entities": [
+            {"name": "EntityName", "type": "person|product|website|software|project", "context": "how they relate to the user", "date": "YYYY-MM-DD", "valence": "positive|negative|neutral"}
+          ]
+        }`;
+
+        // 1. Try Edge Function first (Strategy A & C, Keyless)
         try {
-          const result = await extractEntitiesWithOracle(logs, groqApiKey, activeCategories.map(c => c.name));
-          if (result) {
-            setOracleInsights(result);
+          const { data: edgeRes, error: edgeErr } = await supabase.functions.invoke('ai-insights', {
+            body: {
+              action: 'extract-entities',
+              payload: { prompt: promptPayload }
+            }
+          });
+          if (edgeErr) throw edgeErr;
+          if (edgeRes && edgeRes.result) {
+            setOracleInsights(edgeRes.result);
+            if (edgeRes.ai_calls_today !== undefined) {
+              setAiCallsToday(edgeRes.ai_calls_today);
+            }
+            setIsSyncingOracle(false);
+            return;
           }
         } catch (err) {
-          alert(`Sync failed: ${err.message}`);
-        } finally {
-          setIsSyncingOracle(false);
+          console.warn("Edge Function Oracle sync failed, trying client key fallback:", err);
         }
+
+        // 2. Fallback to client-side Groq API call if user has local key configured
+        if (groqApiKey.trim()) {
+          try {
+            const result = await extractEntitiesWithOracle(logs, groqApiKey, activeCategories.map(c => c.name));
+            if (result) {
+              setOracleInsights(result);
+            }
+          } catch (err) {
+            alert(`Sync failed: ${err.message}`);
+          }
+        } else {
+          alert("Oracle sync failed. No active Edge Function deployed and no Groq API Key set in settings.");
+        }
+        setIsSyncingOracle(false);
       };
 
       // Save Settings
@@ -1224,11 +1363,26 @@
               </div>
             </div>
 
-            <div class="flex items-center gap-2 px-3 py-1.5 bg-white/[0.02] border border-white/5 rounded-full backdrop-blur-md">
-              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider font-mono">
-                Vault Active
-              </span>
+            <div class="flex items-center gap-3">
+              {/* Vault Energy charging bar */}
+              <div class="hidden sm:flex flex-col items-end gap-1">
+                <div class="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 font-mono tracking-wider uppercase">
+                  <span>Vault Energy:</span>
+                  <span class="text-cyan-400">{Math.max(0, 20 - aiCallsToday)} / 20</span>
+                </div>
+                <div class="w-24 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                  <div 
+                    class={`h-full transition-all duration-500 ${aiCallsToday >= 20 ? 'bg-red-500' : 'bg-gradient-to-r from-cyan-400 to-purple-600'}`}
+                    style={{ width: `${Math.max(0, ((20 - aiCallsToday) / 20) * 100)}%` }}></div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 px-3 py-1.5 bg-white/[0.02] border border-white/5 rounded-full backdrop-blur-md">
+                <span class={`w-2.5 h-2.5 rounded-full ${aiCallsToday >= 20 ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`}></span>
+                <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider font-mono">
+                  {aiCallsToday >= 20 ? 'Energy Depleted' : 'Vault Active'}
+                </span>
+              </div>
             </div>
           </header>
 
@@ -1391,7 +1545,7 @@
                       />
                       <button
                         onClick={executeAskPulse}
-                        disabled={askLoading || !askQuery.trim()}
+                        disabled={askLoading || !askQuery.trim() || (aiCallsToday >= 20 && !groqApiKey.trim())}
                         class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white font-medium px-6 py-3 rounded-xl transition-all shadow-md shadow-purple-500/10 flex items-center gap-2">
                         {askLoading ? (
                           <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -1419,16 +1573,16 @@
                       <div>
                         <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5">Supporting Source Memories</h4>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {askResponse.sources.map(srcDate => {
-                            const matchingLog = logs.find(l => l.date === srcDate);
+                          {askResponse.sources.map(srcId => {
+                            const matchingLog = logs.find(l => l.id === srcId || l.date === srcId);
                             if (!matchingLog) return null;
                             return (
                               <div 
-                                key={srcDate} 
-                                onClick={() => setSelectedSpotlightDay({ date: srcDate, logs: [matchingLog] })}
+                                key={matchingLog.id || matchingLog.date} 
+                                onClick={() => setSelectedSpotlightDay({ date: matchingLog.date, logs: [matchingLog] })}
                                 class="bg-white/[0.02] border border-white/5 rounded-xl p-3.5 hover:border-white/15 hover:bg-white/[0.04] transition-all cursor-pointer">
                                 <div class="flex justify-between items-center mb-1.5">
-                                  <span class="text-xs font-mono font-bold text-gray-300">{srcDate}</span>
+                                  <span class="text-xs font-mono font-bold text-gray-300">{matchingLog.date}</span>
                                   <span class={`text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-white/5 ${resolveStateStyling(matchingLog.dominant_emotion).textColor}`}>
                                     {matchingLog.dominant_emotion || 'Lazy'}
                                   </span>
@@ -1459,8 +1613,8 @@
                       </h2>
                       <button
                         onClick={syncOracleInsights}
-                        disabled={isSyncingOracle}
-                        class="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all"
+                        disabled={isSyncingOracle || (aiCallsToday >= 20 && !groqApiKey.trim())}
+                        class="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all disabled:opacity-30"
                         title="Re-run AI Extraction Pipeline">
                         <svg class={`w-4 h-4 ${isSyncingOracle ? 'animate-spin text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
@@ -1526,8 +1680,9 @@
                         <p class="text-sm text-gray-500 mb-4">No AI Insights Synchronized.</p>
                         <button
                           onClick={syncOracleInsights}
-                          class="px-4 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 rounded-xl text-xs font-semibold text-indigo-300 transition-all">
-                          Sync Oracle Now
+                          disabled={isSyncingOracle || (aiCallsToday >= 20 && !groqApiKey.trim())}
+                          class="px-4 py-2 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 rounded-xl text-xs font-semibold text-indigo-300 transition-all disabled:opacity-50">
+                          {(aiCallsToday >= 20 && !groqApiKey.trim()) ? 'Energy Depleted' : 'Sync Oracle Now'}
                         </button>
                       </div>
                     )}
@@ -1629,14 +1784,14 @@
                     
                     <button
                       onClick={saveDailyPulse}
-                      disabled={!dailyPulseText.trim() || dailyPulseStatus === 'saving'}
+                      disabled={!dailyPulseText.trim() || dailyPulseStatus === 'saving' || (aiCallsToday >= 20 && !geminiApiKey.trim())}
                       class="flex-grow sm:flex-grow-0 bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 disabled:opacity-50 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-2">
                       {dailyPulseStatus === 'saving' ? (
                         <>
                           <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                           Saving Daily Log...
                         </>
-                      ) : 'Push Daily Log to Vault'}
+                      ) : (aiCallsToday >= 20 && !geminiApiKey.trim()) ? 'Daily Energy Exhausted' : 'Push Daily Log to Vault'}
                     </button>
                   </div>
                 </div>
