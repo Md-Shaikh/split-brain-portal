@@ -508,6 +508,7 @@
 
       // 8b. Default Local Search State
       const [localSearchQuery, setLocalSearchQuery] = useState('');
+
       
       // 9. Oracle Macro Insights & Sync Status
       const [oracleInsights, setOracleInsights] = useState(() => {
@@ -995,6 +996,7 @@
                 setAiCallsToday(data.ai_calls_today);
               }
             }
+
           } else {
             // Profile doesn't exist, create it dynamically
             await supabase
@@ -1440,6 +1442,8 @@
         }
       };
 
+
+
       if (!supabase) {
         return (
           <div class="min-h-screen flex items-center justify-center p-4 relative z-10">
@@ -1550,7 +1554,11 @@
                           });
                           if (error) throw error;
                         } catch (err) {
-                          setAuthError(err.message);
+                          if (err.message === 'Invalid login credentials') {
+                            setAuthError("User doesn't exist or wrong password. Please switch to 'Create Vault' below.");
+                          } else {
+                            setAuthError(err.message);
+                          }
                         } finally {
                           setAuthLoading(false);
                         }
@@ -2536,6 +2544,8 @@
                       </button>
                     </div>
                   </div>
+
+
 
                   {/* Danger Zone */}
                   <div class="mt-6 border-t border-red-500/20 pt-6">
