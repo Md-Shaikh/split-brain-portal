@@ -1947,8 +1947,8 @@
                     <p class="text-xs text-gray-400 mt-1">Search through your behavior database. Runs completely offline in your browser, keyless and secure.</p>
                   </div>
 
-                  <div class="flex gap-2.5">
-                    <div class="relative flex-grow">
+                  <div class="flex flex-col sm:flex-row gap-2.5">
+                    <div class="relative flex-grow w-full">
                       <input 
                         type="text"
                         value={localSearchQuery}
@@ -1965,7 +1965,7 @@
                     {localSearchQuery && (
                       <button 
                         onClick={() => setLocalSearchQuery('')}
-                        class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-5 py-3 rounded-xl transition-all text-sm flex items-center gap-1">
+                        class="w-full sm:w-auto bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-5 py-3 rounded-xl transition-all text-sm flex justify-center items-center gap-1">
                         Clear
                       </button>
                     )}
@@ -2196,7 +2196,7 @@
                       <p class="text-xs text-gray-400 mt-1">Interrogate your behavior database. Ask questions about patterns, projects, or feelings.</p>
                     </div>
 
-                    <div class="flex gap-2.5 mb-5">
+                    <div class="flex flex-col sm:flex-row gap-2.5 mb-5 w-full">
                       <input 
                         type="text"
                         value={askQuery}
@@ -2207,7 +2207,7 @@
                       <button
                         onClick={executeAskPulse}
                         disabled={askLoading || !askQuery.trim() || (aiCallsToday >= 20 && !groqApiKey.trim())}
-                        class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white font-medium px-6 py-3 rounded-xl transition-all shadow-md shadow-purple-500/10 flex items-center gap-2">
+                        class="w-full sm:w-auto bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white font-medium px-6 py-3 rounded-xl transition-all shadow-md shadow-purple-500/10 flex justify-center items-center gap-2">
                         {askLoading ? (
                           <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                         ) : 'Query'}
