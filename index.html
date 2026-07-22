@@ -24,6 +24,11 @@
     }
   </script>
   
+  <!-- Capture hash before Supabase strips it -->
+  <script>
+    window.__INITIAL_HASH__ = window.location.hash;
+  </script>
+  
   <style>
     body {
       font-family: 'Inter', sans-serif;
@@ -467,9 +472,11 @@
       const [session, setSession] = useState(null);
       const [authEmail, setAuthEmail] = useState('');
       const [authPassword, setAuthPassword] = useState('');
+      const [authNewPassword, setAuthNewPassword] = useState('');
       const [authLoading, setAuthLoading] = useState(false);
       const [authError, setAuthError] = useState(null);
-      const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup'
+      const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
+      const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'forgot' | 'reset'
 
       // 1. Navigation View State
       const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' | 'daily-pulse' | 'settings'
@@ -479,8 +486,60 @@
       const [groqApiKey, setGroqApiKey] = useState(() => localStorage.getItem('sb_groq_key') || '');
       const [aiCallsToday, setAiCallsToday] = useState(0);
 
+      // Supabase session listener & Password Recovery handler
+      useEffect(() => {
+        if (!supabase) return;
+
+        // Check if user landed directly from a password recovery email link or with an error
+        const activeHash = window.__INITIAL_HASH__ || window.location.hash;
+        if (activeHash) {
+          const hashParams = new URLSearchParams(activeHash.substring(1));
+          const errorDescription = hashParams.get('error_description');
+          const errorCode = hashParams.get('error_code');
+          
+          if (errorDescription || errorCode === 'otp_expired') {
+            const cleanMsg = errorDescription 
+              ? decodeURIComponent(errorDescription).replace(/\+/g, ' ') 
+              : "This reset link is invalid or has expired. Please request a new one below.";
+            setAuthError(cleanMsg);
+            setAuthMode('forgot');
+            setAuthSuccessMsg(null);
+            if (window.history && window.history.replaceState) {
+              window.history.replaceState(null, '', window.location.pathname);
+            }
+          } else if (activeHash.includes('type=recovery')) {
+            setCurrentView('settings');
+            // Allow Supabase to handle the implicit login from the hash, 
+            // which will make session truthy and render the settings view.
+          }
+          // Clear initial hash so it doesn't trigger on subsequent re-renders if ignored
+          window.__INITIAL_HASH__ = '';
+        }
+        
+        // Initial session check
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          setSession(session);
+        });
+
+        // Listen for auth state changes & recovery events
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+          setSession(session);
+          if (event === 'PASSWORD_RECOVERY') {
+            setCurrentView('settings');
+          }
+        });
+
+        return () => subscription.unsubscribe();
+      }, []);
+
       // 3. Core Logs State
       const [logs, setLogs] = useState([]);
+
+      // Settings Password State
+      const [settingsNewPassword, setSettingsNewPassword] = useState('');
+      const [settingsPasswordLoading, setSettingsPasswordLoading] = useState(false);
+      const [settingsPasswordMsg, setSettingsPasswordMsg] = useState(null);
+      const [settingsPasswordError, setSettingsPasswordError] = useState(null);
 
       // 4. Sheets Sync State
       const [isSyncingSheets, setIsSyncingSheets] = useState(false);
@@ -1014,21 +1073,7 @@
         }
       }, [oracleInsights]);
 
-      // Supabase session listener
-      useEffect(() => {
-        if (!supabase) return;
-        // Initial session check
-        supabase.auth.getSession().then(({ data: { session } }) => {
-          setSession(session);
-        });
 
-        // Listen for updates
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-          setSession(session);
-        });
-
-        return () => subscription.unsubscribe();
-      }, []);
 
       // Session trigger fetching
       useEffect(() => {
@@ -1496,153 +1541,299 @@
         );
       }
 
-      if (!session) {
+      if (!session || authMode === 'reset') {
         return (
-          <div class="min-h-screen flex items-center justify-center p-4 relative z-10">
-            <div class="w-full max-w-md bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
-              <div class="flex flex-col items-center mb-6">
-                <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-400 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 mb-3">
-                  <span class="font-display font-black text-xl text-white">S</span>
+          <div className="min-h-screen flex items-center justify-center p-4 relative z-10">
+            <div className="w-full max-w-md bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+              <div className="flex flex-col items-center mb-6">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-400 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 mb-3">
+                  <span className="font-display font-black text-xl text-white">S</span>
                 </div>
-                <h2 class="text-2xl font-black text-white tracking-tight text-center font-display">
+                <h2 className="text-2xl font-black text-white tracking-tight text-center font-display">
                   SPLIT-BRAIN VAULT
                 </h2>
-                <p class="text-[10px] text-gray-400 mt-1 uppercase tracking-wider font-semibold font-mono">
-                  {authMode === 'login' ? 'Enter secure vault' : 'Create new secure vault'}
+                <p className="text-[10px] text-gray-400 mt-1 uppercase tracking-wider font-semibold font-mono">
+                  {authMode === 'login' && 'Enter secure vault'}
+                  {authMode === 'signup' && 'Create new secure vault'}
+                  {authMode === 'forgot' && 'Reset vault password'}
+                  {authMode === 'reset' && 'Set new vault password'}
                 </p>
               </div>
 
               {authError && (
-                <div class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl p-4 mb-4">
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl p-4 mb-4">
                   {authError}
                 </div>
               )}
 
-              <div class="space-y-4">
-                <div>
-                  <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">Email Address</label>
-                  <input
-                    type="email"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="name@domain.com"
-                    class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
-                  />
+              {authSuccessMsg && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-xl p-4 mb-4">
+                  {authSuccessMsg}
                 </div>
+              )}
 
-                <div>
-                  <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">Password</label>
-                  <input
-                    type="password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    placeholder="••••••••"
-                    class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
-                  />
-                </div>
+              {/* FORGOT PASSWORD MODE */}
+              {authMode === 'forgot' && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    Enter the email address associated with your vault. We will send you a password recovery link.
+                  </p>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">Email Address</label>
+                    <input
+                      type="email"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="name@domain.com"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
+                    />
+                  </div>
 
-                <div class="pt-2">
-                  {authMode === 'login' ? (
+                  <div className="pt-2">
                     <button
                       onClick={async () => {
                         setAuthLoading(true);
                         setAuthError(null);
+                        setAuthSuccessMsg(null);
                         try {
-                          const { error } = await supabase.auth.signInWithPassword({
-                            email: authEmail,
-                            password: authPassword,
+                          const { error } = await supabase.auth.resetPasswordForEmail(authEmail, {
+                            redirectTo: window.location.origin + window.location.pathname
                           });
                           if (error) throw error;
+                          setAuthSuccessMsg("Password reset link sent! Please check your email inbox to reset your password.");
                         } catch (err) {
-                          if (err.message === 'Invalid login credentials') {
-                            setAuthError("User doesn't exist or wrong password. Please switch to 'Create Vault' below.");
-                          } else {
-                            setAuthError(err.message);
-                          }
+                          const msg = (err && typeof err.message === 'string' && err.message !== '{}') 
+                            ? err.message 
+                            : (err && typeof err.error_description === 'string') 
+                              ? err.error_description 
+                              : "SMTP email error. Please check your Supabase custom SMTP credentials (e.g. sender email must be onboarding@resend.dev for Resend).";
+                          setAuthError(msg);
                         } finally {
                           setAuthLoading(false);
                         }
                       }}
-                      disabled={authLoading || !authEmail || !authPassword}
-                      class="w-full bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/10 flex items-center justify-center gap-2"
+                      disabled={authLoading || !authEmail}
+                      className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-orange-500/10 flex items-center justify-center gap-2"
                     >
-                      {authLoading ? <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Sign In'}
+                      {authLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Send Reset Link'}
                     </button>
-                  ) : (
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-white/5 text-center">
+                    <button
+                      onClick={() => {
+                        setAuthMode('login');
+                        setAuthError(null);
+                        setAuthSuccessMsg(null);
+                      }}
+                      className="text-xs text-gray-400 hover:text-white transition-all font-medium"
+                    >
+                      Back to Sign In
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* RESET PASSWORD MODE (LANDING FROM EMAIL LINK) */}
+              {authMode === 'reset' && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    Please enter your new vault password below to complete the reset.
+                  </p>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">New Password</label>
+                    <input
+                      type="password"
+                      value={authNewPassword}
+                      onChange={(e) => setAuthNewPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
+                    />
+                  </div>
+
+                  <div className="pt-2">
                     <button
                       onClick={async () => {
                         setAuthLoading(true);
                         setAuthError(null);
+                        setAuthSuccessMsg(null);
                         try {
-                          const { error } = await supabase.auth.signUp({
-                            email: authEmail,
-                            password: authPassword,
+                          const { error } = await supabase.auth.updateUser({
+                            password: authNewPassword
                           });
                           if (error) throw error;
-                          alert("Vault registration complete! Please check your email for confirmation, or try signing in.");
+                          
+                          // Sign out recovery session and clear URL hash
+                          await supabase.auth.signOut();
+                          if (window.history && window.history.replaceState) {
+                            window.history.replaceState(null, '', window.location.pathname);
+                          }
+                          
+                          setAuthSuccessMsg("Password updated successfully! Please sign in with your new password.");
                           setAuthMode('login');
+                          setAuthNewPassword('');
                         } catch (err) {
                           setAuthError(err.message);
                         } finally {
                           setAuthLoading(false);
                         }
                       }}
-                      disabled={authLoading || !authEmail || !authPassword}
-                      class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-pink-500/10 flex items-center justify-center gap-2"
+                      disabled={authLoading || !authNewPassword}
+                      className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-teal-500/10 flex items-center justify-center gap-2"
                     >
-                      {authLoading ? <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Create Vault'}
+                      {authLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Update Password'}
                     </button>
-                  )}
-                </div>
-
-                <div class="relative flex items-center justify-center py-2">
-                  <div class="absolute inset-0 flex items-center">
-                    <div class="w-full border-t border-white/5"></div>
                   </div>
-                  <span class="relative bg-zinc-950 px-3 text-[10px] uppercase font-bold text-gray-500 font-mono tracking-wider z-10">
-                    or
-                  </span>
                 </div>
+              )}
 
-                <button
-                  onClick={async () => {
-                    setAuthLoading(true);
-                    setAuthError(null);
-                    try {
-                      const { error } = await supabase.auth.signInWithOAuth({
-                        provider: 'google',
-                        options: {
-                          redirectTo: window.location.origin + window.location.pathname
-                        }
-                      });
-                      if (error) throw error;
-                    } catch (err) {
-                      setAuthError(err.message);
-                    } finally {
-                      setAuthLoading(false);
-                    }
-                  }}
-                  disabled={authLoading}
-                  class="w-full bg-white/5 border border-white/10 hover:bg-white/15 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2.5 text-xs shadow-md"
-                >
-                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.513 0-6.386-2.87-6.386-6.385s2.87-6.386 6.386-6.386c1.543 0 2.957.557 4.05 1.5l3.15-3.15C19.26 2.228 15.937 1 12.24 1 6.042 1 1 6.042 1 12.24s5.042 11.24 11.24 11.24c6.386 0 11.24-5.042 11.24-11.24 0-.771-.086-1.5-.24-2.185H12.24z"/>
-                  </svg>
-                  Continue with Google
-                </button>
-              </div>
+              {/* LOGIN AND SIGNUP MODES */}
+              {(authMode === 'login' || authMode === 'signup') && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">Email Address</label>
+                    <input
+                      type="email"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="name@domain.com"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
+                    />
+                  </div>
 
-              <div class="mt-6 border-t border-white/5 pt-4 text-center">
-                <button
-                  onClick={() => {
-                    setAuthMode(authMode === 'login' ? 'signup' : 'login');
-                    setAuthError(null);
-                  }}
-                  class="text-xs text-gray-400 hover:text-white transition-all font-medium"
-                >
-                  {authMode === 'login' ? "Don't have a vault? Create one" : "Already have a vault? Sign In"}
-                </button>
-              </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest font-mono">Password</label>
+                      {authMode === 'login' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthMode('forgot');
+                            setAuthError(null);
+                            setAuthSuccessMsg(null);
+                          }}
+                          className="text-[11px] text-cyan-400 hover:text-cyan-300 font-medium transition-all"
+                        >
+                          Forgot Password?
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="password"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder-gray-600 font-medium"
+                    />
+                  </div>
+
+                  <div className="pt-2">
+                    {authMode === 'login' ? (
+                      <button
+                        onClick={async () => {
+                          setAuthLoading(true);
+                          setAuthError(null);
+                          setAuthSuccessMsg(null);
+                          try {
+                            const { error } = await supabase.auth.signInWithPassword({
+                              email: authEmail,
+                              password: authPassword,
+                            });
+                            if (error) throw error;
+                          } catch (err) {
+                            if (err.message === 'Invalid login credentials') {
+                              setAuthError("User doesn't exist or wrong password. Please switch to 'Create Vault' below.");
+                            } else {
+                              setAuthError(err.message);
+                            }
+                          } finally {
+                            setAuthLoading(false);
+                          }
+                        }}
+                        disabled={authLoading || !authEmail || !authPassword}
+                        className="w-full bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/10 flex items-center justify-center gap-2"
+                      >
+                        {authLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Sign In'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          setAuthLoading(true);
+                          setAuthError(null);
+                          setAuthSuccessMsg(null);
+                          try {
+                            const { error } = await supabase.auth.signUp({
+                              email: authEmail,
+                              password: authPassword,
+                            });
+                            if (error) throw error;
+                            alert("Vault registration complete! Please check your email for confirmation, or try signing in.");
+                            setAuthMode('login');
+                          } catch (err) {
+                            setAuthError(err.message);
+                          } finally {
+                            setAuthLoading(false);
+                          }
+                        }}
+                        disabled={authLoading || !authEmail || !authPassword}
+                        className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-pink-500/10 flex items-center justify-center gap-2"
+                      >
+                        {authLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Create Vault'}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="relative flex items-center justify-center py-2">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-white/5"></div>
+                    </div>
+                    <span className="relative bg-zinc-950 px-3 text-[10px] uppercase font-bold text-gray-500 font-mono tracking-wider z-10">
+                      or
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      setAuthLoading(true);
+                      setAuthError(null);
+                      setAuthSuccessMsg(null);
+                      try {
+                        const { error } = await supabase.auth.signInWithOAuth({
+                          provider: 'google',
+                          options: {
+                            redirectTo: window.location.origin + window.location.pathname
+                          }
+                        });
+                        if (error) throw error;
+                      } catch (err) {
+                        setAuthError(err.message);
+                      } finally {
+                        setAuthLoading(false);
+                      }
+                    }}
+                    disabled={authLoading}
+                    className="w-full bg-white/5 border border-white/10 hover:bg-white/15 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2.5 text-xs shadow-md"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.513 0-6.386-2.87-6.386-6.385s2.87-6.386 6.386-6.386c1.543 0 2.957.557 4.05 1.5l3.15-3.15C19.26 2.228 15.937 1 12.24 1 6.042 1 1 6.042 1 12.24s5.042 11.24 11.24 11.24c6.386 0 11.24-5.042 11.24-11.24 0-.771-.086-1.5-.24-2.185H12.24z"/>
+                    </svg>
+                    Continue with Google
+                  </button>
+
+                  <div className="mt-6 border-t border-white/5 pt-4 text-center">
+                    <button
+                      onClick={() => {
+                        setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                        setAuthError(null);
+                        setAuthSuccessMsg(null);
+                      }}
+                      className="text-xs text-gray-400 hover:text-white transition-all font-medium"
+                    >
+                      {authMode === 'login' ? "Don't have a vault? Create one" : "Already have a vault? Sign In"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -2544,9 +2735,63 @@
                       </button>
                     </div>
                   </div>
-
-
-
+                  {/* Account Security - Password Change */}
+                  <div class="mt-6 border-t border-white/10 pt-6">
+                    <h3 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                      <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4v-3.252l6.551-6.551A6 6 0 1115 9z" />
+                      </svg>
+                      Account Security
+                    </h3>
+                    <p class="text-xs text-gray-400 mb-4 font-medium">Update your vault password.</p>
+                    
+                    <div class="bg-black/30 border border-white/5 rounded-xl p-4">
+                      {settingsPasswordError && (
+                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl p-3 mb-3">
+                          {settingsPasswordError}
+                        </div>
+                      )}
+                      {settingsPasswordMsg && (
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-xl p-3 mb-3">
+                          {settingsPasswordMsg}
+                        </div>
+                      )}
+                      <div class="flex flex-col sm:flex-row gap-3 items-end">
+                        <div class="w-full">
+                          <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1.5 font-mono">New Password</label>
+                          <input
+                            type="password"
+                            value={settingsNewPassword}
+                            onChange={(e) => setSettingsNewPassword(e.target.value)}
+                            placeholder="Enter new password"
+                            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500 transition-all text-white placeholder-gray-600 font-medium"
+                          />
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (!settingsNewPassword) return;
+                            setSettingsPasswordLoading(true);
+                            setSettingsPasswordError(null);
+                            setSettingsPasswordMsg(null);
+                            try {
+                              const { error } = await supabase.auth.updateUser({ password: settingsNewPassword });
+                              if (error) throw error;
+                              setSettingsPasswordMsg("Password updated successfully.");
+                              setSettingsNewPassword('');
+                            } catch (err) {
+                              setSettingsPasswordError(err.message);
+                            } finally {
+                              setSettingsPasswordLoading(false);
+                            }
+                          }}
+                          disabled={settingsPasswordLoading || !settingsNewPassword}
+                          class="whitespace-nowrap px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
+                        >
+                          {settingsPasswordLoading ? <span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Update Password'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                   {/* Danger Zone */}
                   <div class="mt-6 border-t border-red-500/20 pt-6">
                     <h3 class="text-lg font-bold text-red-400 mb-2 flex items-center gap-2">
