@@ -1811,8 +1811,8 @@
                       setAuthError(null);
                       setAuthSuccessMsg(null);
                       try {
-                        // 1. Detect if the user is currently using the Median Android app
-                        const isMedianApp = typeof window.median !== 'undefined' || typeof window.gonative !== 'undefined';
+                        // 1. Detect if the user is currently using the Median Android app (via User Agent)
+                        const isMedianApp = navigator.userAgent.toLowerCase().includes('median');
 
                         // 2. Choose the correct redirect destination
                         const redirectUrl = isMedianApp 
