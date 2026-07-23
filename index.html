@@ -1811,13 +1811,26 @@
                       setAuthError(null);
                       setAuthSuccessMsg(null);
                       try {
-                        const { error } = await supabase.auth.signInWithOAuth({
+                        // 1. Detect if the user is currently using the Median Android app
+                        const isMedianApp = typeof window.median !== 'undefined' || typeof window.gonative !== 'undefined';
+
+                        // 2. Choose the correct redirect destination
+                        const redirectUrl = isMedianApp 
+                          ? 'splitbrain://split-brain-portal.vercel.app/'  // Sends them back into the APK
+                          : 'https://split-brain-portal.vercel.app/';      // Standard web browser behavior
+
+                        // 3. Trigger the Supabase login
+                        const { data, error } = await supabase.auth.signInWithOAuth({
                           provider: 'google',
                           options: {
-                            redirectTo: window.location.origin + window.location.pathname
+                            redirectTo: redirectUrl
                           }
                         });
-                        if (error) throw error;
+
+                        if (error) {
+                          console.error("Error logging in with Google:", error.message);
+                          throw error;
+                        }
                       } catch (err) {
                         setAuthError(err.message);
                       } finally {
