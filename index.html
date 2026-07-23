@@ -1811,19 +1811,10 @@
                       setAuthError(null);
                       setAuthSuccessMsg(null);
                       try {
-                        // 1. Detect if the user is currently using the Median Android app (via User Agent)
-                        const isMedianApp = navigator.userAgent.toLowerCase().includes('median');
-
-                        // 2. Choose the correct redirect destination
-                        const redirectUrl = isMedianApp 
-                          ? 'splitbrain://split-brain-portal.vercel.app/'  // Sends them back into the APK
-                          : 'https://split-brain-portal.vercel.app/';      // Standard web browser behavior
-
-                        // 3. Trigger the Supabase login
                         const { data, error } = await supabase.auth.signInWithOAuth({
                           provider: 'google',
                           options: {
-                            redirectTo: redirectUrl
+                            redirectTo: 'https://split-brain-portal.vercel.app/'
                           }
                         });
 
