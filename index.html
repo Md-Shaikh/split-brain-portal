@@ -490,6 +490,8 @@
       const [authError, setAuthError] = useState(null);
       const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
       const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'forgot' | 'reset'
+      const [authAcceptedTerms, setAuthAcceptedTerms] = useState(false);
+      const [legalModalTab, setLegalModalTab] = useState(null); // null | 'terms' | 'privacy'
 
       // 1. Navigation View State
       const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' | 'daily-pulse' | 'settings'
@@ -1743,6 +1745,36 @@
                     />
                   </div>
 
+                  {authMode === 'signup' && (
+                    <div className="flex items-start gap-2.5 my-3 p-3 bg-white/[0.02] border border-white/5 rounded-xl text-left">
+                      <input
+                        type="checkbox"
+                        id="termsCheckbox"
+                        checked={authAcceptedTerms}
+                        onChange={(e) => setAuthAcceptedTerms(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 rounded border-white/20 bg-black/40 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                      />
+                      <label htmlFor="termsCheckbox" className="text-xs text-gray-300 leading-snug cursor-pointer select-none">
+                        I agree to the{" "}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); setLegalModalTab('terms'); }}
+                          className="text-cyan-400 hover:underline font-semibold"
+                        >
+                          Terms of Service
+                        </button>{" "}
+                        and{" "}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); setLegalModalTab('privacy'); }}
+                          className="text-cyan-400 hover:underline font-semibold"
+                        >
+                          Privacy Policy
+                        </button>.
+                      </label>
+                    </div>
+                  )}
+
                   <div className="pt-2">
                     {authMode === 'login' ? (
                       <button
@@ -1791,7 +1823,7 @@
                             setAuthLoading(false);
                           }
                         }}
-                        disabled={authLoading || !authEmail || !authPassword}
+                        disabled={authLoading || !authEmail || !authPassword || !authAcceptedTerms}
                         className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-pink-500/10 flex items-center justify-center gap-2"
                       >
                         {authLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Create Vault'}
@@ -1799,46 +1831,58 @@
                     )}
                   </div>
 
-                  <div className="relative flex items-center justify-center py-2">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-white/5"></div>
-                    </div>
-                    <span className="relative bg-zinc-950 px-3 text-[10px] uppercase font-bold text-gray-500 font-mono tracking-wider z-10">
-                      or
-                    </span>
-                  </div>
+                  {(() => {
+                    const isMobileOrTablet = typeof navigator !== 'undefined' && (
+                      /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini|mobile|tablet/i.test(navigator.userAgent.toLowerCase()) ||
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+                    );
+                    if (isMobileOrTablet) return null;
 
-                  <button
-                    onClick={async () => {
-                      setAuthLoading(true);
-                      setAuthError(null);
-                      setAuthSuccessMsg(null);
-                      try {
-                        const { data, error } = await supabase.auth.signInWithOAuth({
-                          provider: 'google',
-                          options: {
-                            redirectTo: 'https://split-brain-portal.vercel.app/'
-                          }
-                        });
+                    return (
+                      <React.Fragment>
+                        <div className="relative flex items-center justify-center py-2">
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-white/5"></div>
+                          </div>
+                          <span className="relative bg-zinc-950 px-3 text-[10px] uppercase font-bold text-gray-500 font-mono tracking-wider z-10">
+                            or
+                          </span>
+                        </div>
 
-                        if (error) {
-                          console.error("Error logging in with Google:", error.message);
-                          throw error;
-                        }
-                      } catch (err) {
-                        setAuthError(err.message);
-                      } finally {
-                        setAuthLoading(false);
-                      }
-                    }}
-                    disabled={authLoading}
-                    className="w-full bg-white/5 border border-white/10 hover:bg-white/15 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2.5 text-xs shadow-md"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.513 0-6.386-2.87-6.386-6.385s2.87-6.386 6.386-6.386c1.543 0 2.957.557 4.05 1.5l3.15-3.15C19.26 2.228 15.937 1 12.24 1 6.042 1 1 6.042 1 12.24s5.042 11.24 11.24 11.24c6.386 0 11.24-5.042 11.24-11.24 0-.771-.086-1.5-.24-2.185H12.24z"/>
-                    </svg>
-                    Continue with Google
-                  </button>
+                        <button
+                          onClick={async () => {
+                            setAuthLoading(true);
+                            setAuthError(null);
+                            setAuthSuccessMsg(null);
+                            try {
+                              const { data, error } = await supabase.auth.signInWithOAuth({
+                                provider: 'google',
+                                options: {
+                                  redirectTo: 'https://split-brain-portal.vercel.app/'
+                                }
+                              });
+
+                              if (error) {
+                                console.error("Error logging in with Google:", error.message);
+                                throw error;
+                              }
+                            } catch (err) {
+                              setAuthError(err.message);
+                            } finally {
+                              setAuthLoading(false);
+                            }
+                          }}
+                          disabled={authLoading}
+                          className="w-full bg-white/5 border border-white/10 hover:bg-white/15 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2.5 text-xs shadow-md"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.513 0-6.386-2.87-6.386-6.385s2.87-6.386 6.386-6.386c1.543 0 2.957.557 4.05 1.5l3.15-3.15C19.26 2.228 15.937 1 12.24 1 6.042 1 1 6.042 1 12.24s5.042 11.24 11.24 11.24c6.386 0 11.24-5.042 11.24-11.24 0-.771-.086-1.5-.24-2.185H12.24z"/>
+                          </svg>
+                          Continue with Google
+                        </button>
+                      </React.Fragment>
+                    );
+                  })()}
 
                   <div className="mt-6 border-t border-white/5 pt-4 text-center">
                     <button
@@ -1852,9 +1896,125 @@
                       {authMode === 'login' ? "Don't have a vault? Create one" : "Already have a vault? Sign In"}
                     </button>
                   </div>
+
+                  <div className="flex justify-center items-center gap-3 text-[11px] text-gray-500 mt-4 font-medium border-t border-white/5 pt-3">
+                    <button onClick={() => setLegalModalTab('terms')} className="hover:text-gray-300 transition-colors">Terms of Service</button>
+                    <span>•</span>
+                    <button onClick={() => setLegalModalTab('privacy')} className="hover:text-gray-300 transition-colors">Privacy Policy</button>
+                  </div>
                 </div>
               )}
             </div>
+
+            {/* LEGAL COMPLIANCE MODAL */}
+            {legalModalTab !== null && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+                <div className="bg-zinc-900 border border-white/10 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl relative overflow-hidden">
+                  
+                  {/* Modal Header */}
+                  <div className="p-5 border-b border-white/10 flex justify-between items-center bg-zinc-950/60">
+                    <div className="flex gap-2 bg-white/5 border border-white/10 rounded-xl p-1">
+                      <button
+                        onClick={() => setLegalModalTab('terms')}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          legalModalTab === 'terms'
+                            ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Terms of Service
+                      </button>
+                      <button
+                        onClick={() => setLegalModalTab('privacy')}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          legalModalTab === 'privacy'
+                            ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Privacy Policy
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => setLegalModalTab(null)}
+                      className="text-gray-400 hover:text-white p-1 hover:bg-white/10 rounded-lg transition-all"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Modal Body */}
+                  <div className="p-6 overflow-y-auto space-y-4 text-xs text-gray-300 leading-relaxed font-sans custom-scrollbar">
+                    {legalModalTab === 'terms' ? (
+                      <React.Fragment>
+                        <h3 className="text-base font-black text-white font-display mb-1">TERMS OF SERVICE</h3>
+                        <p className="text-[10px] text-gray-500 font-mono">Last Updated: August 2026</p>
+
+                        <div className="space-y-3 pt-2">
+                          <h4 className="font-bold text-cyan-400 text-xs uppercase tracking-wider font-mono">1. Acceptance & Scope</h4>
+                          <p>By registering an account or accessing the Split-Brain Portal ("Vault"), you agree to be bound by these Terms of Service ("Terms") and our Privacy Policy. If you do not agree to all terms, you must not use this service.</p>
+
+                          <h4 className="font-bold text-cyan-400 text-xs uppercase tracking-wider font-mono">2. Vault Account & Security</h4>
+                          <p>You are responsible for maintaining the confidentiality of your account credentials. You accept full responsibility for all activities that occur under your vault session. Notify us immediately of any unauthorized access.</p>
+
+                          <h4 className="font-bold text-cyan-400 text-xs uppercase tracking-wider font-mono">3. Acceptable Use</h4>
+                          <p>You agree to use Split-Brain Portal solely for lawful, personal behavioral logging and analytics. You agree not to attempt to reverse engineer, disrupt, or exploit the platform, servers, or underlying infrastructure.</p>
+
+                          <h4 className="font-bold text-cyan-400 text-xs uppercase tracking-wider font-mono">4. AI Insights & Data Processing</h4>
+                          <p>Split-Brain Portal incorporates Artificial Intelligence APIs (including Google Gemini and Groq APIs) to analyze mood trends and extract entity insights. You acknowledge that AI-generated insights are provided for analytical self-reflection purposes and do not constitute medical, psychological, or professional health advice.</p>
+
+                          <h4 className="font-bold text-cyan-400 text-xs uppercase tracking-wider font-mono">5. Intellectual Property & Ownership</h4>
+                          <p>You retain 100% full ownership of all personal text logs, journals, and behavioral records stored in your vault. Split-Brain Portal claims no ownership over user-generated content.</p>
+
+                          <h4 className="font-bold text-cyan-400 text-xs uppercase tracking-wider font-mono">6. Limitation of Liability</h4>
+                          <p>Split-Brain Portal is provided on an "AS IS" and "AS AVAILABLE" basis. To the maximum extent permitted by law, we shall not be liable for any indirect, incidental, or consequential damages resulting from service interruptions or loss of data.</p>
+                        </div>
+                      </React.Fragment>
+                    ) : (
+                      <React.Fragment>
+                        <h3 className="text-base font-black text-white font-display mb-1">PRIVACY POLICY</h3>
+                        <p className="text-[10px] text-gray-500 font-mono">Last Updated: August 2026</p>
+
+                        <div className="space-y-3 pt-2">
+                          <h4 className="font-bold text-purple-400 text-xs uppercase tracking-wider font-mono">1. Information We Collect</h4>
+                          <p>We collect your email address for account authentication and authentication recovery. When you log notes or journals, your content, mood categories, timestamps, and AI-extracted entity relationships are stored securely.</p>
+
+                          <h4 className="font-bold text-purple-400 text-xs uppercase tracking-wider font-mono">2. Storage & Security</h4>
+                          <p>Your vault data is stored using Supabase Cloud Database with encrypted transport (HTTPS/TLS) and strict access controls. Local state is cached on your device using encrypted browser storage.</p>
+
+                          <h4 className="font-bold text-purple-400 text-xs uppercase tracking-wider font-mono">3. AI Processing Disclosures</h4>
+                          <p>When you invoke AI analysis or Oracle queries, your log inputs are processed by secure API endpoints (Google Gemini & Groq APIs). Data submitted to these APIs is processed solely to return your analytics and is not sold to third-party advertisers.</p>
+
+                          <h4 className="font-bold text-purple-400 text-xs uppercase tracking-wider font-mono">4. GDPR & CCPA User Rights</h4>
+                          <p>You have full control over your personal data: You have the right to access, export, or permanently delete your entire vault history at any time directly through the <strong>Account Settings</strong> panel in the application.</p>
+
+                          <h4 className="font-bold text-purple-400 text-xs uppercase tracking-wider font-mono">5. Cookies & Local Cache</h4>
+                          <p>We use essential local storage strictly for session persistence, security tokens, and user preference caching. We do not use third-party tracking cookies or advertising scripts.</p>
+                        </div>
+                      </React.Fragment>
+                    )}
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="p-4 border-t border-white/10 flex justify-between items-center bg-zinc-950/60">
+                    <span className="text-[10px] text-gray-500 font-mono">Split-Brain Vault Legal Compliance</span>
+                    <button
+                      onClick={() => {
+                        if (authMode === 'signup') setAuthAcceptedTerms(true);
+                        setLegalModalTab(null);
+                      }}
+                      className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold rounded-xl text-xs transition-all shadow"
+                    >
+                      {authMode === 'signup' ? 'Accept & Continue' : 'Close'}
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            )}
           </div>
         );
       }
@@ -3221,8 +3381,13 @@
           </div>
 
           {/* Global Footer */}
-          <footer class="mt-8 border-t border-white/5 pt-6 text-center">
-            <p class="text-xs text-gray-600">Split-Brain Portal Dashboard &copy; 2026. Designed for premium cognitive logging.</p>
+          <footer class="mt-8 border-t border-white/5 pt-6 pb-4 text-center flex flex-col gap-2">
+            <p class="text-xs text-gray-500">Split-Brain Portal Dashboard &copy; 2026. Designed for premium cognitive logging.</p>
+            <div class="flex justify-center items-center gap-3 text-[11px] text-gray-400 font-medium">
+              <button onClick={() => setLegalModalTab('terms')} class="hover:text-cyan-400 transition-colors">Terms of Service</button>
+              <span>•</span>
+              <button onClick={() => setLegalModalTab('privacy')} class="hover:text-cyan-400 transition-colors">Privacy Policy</button>
+            </div>
           </footer>
 
         </div>
