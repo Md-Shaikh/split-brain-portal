@@ -1427,7 +1427,12 @@
         setIsSyncingOracle(true);
         window.userTriggeredAIEvent = true;
 
-        const promptPayload = `Analyze these logs: ${JSON.stringify(logs)}. 
+        // Trim history to prevent Groq token limits/payload size crashes
+        let journalLogs = logs.filter(l => l.stream === 'Journal' || l.stream === 'dailyPulse' || !l.stream);
+        let recentLogs = journalLogs.slice(-15);
+        let safeLogsString = JSON.stringify(recentLogs);
+
+        const promptPayload = `Analyze these logs: ${safeLogsString}. 
         Identify entities (people, products, websites, software, projects). 
         Extract dominant topics, trends, daily summary, uncomfortable truths, and golden patterns. 
         Return ONLY a JSON object with: 
