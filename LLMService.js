@@ -39,7 +39,7 @@ export const analyzeLogsWithGemini = async (promptText, apiKey) => {
   const API_KEY = apiKey || "YOUR_GEMINI_API_KEY";
   
   // Model fallback list
-  const models = ["gemini-1.5-flash-latest", "gemini-1.5-flash-8b", "gemini-1.5-flash"];
+  const models = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"];
   let lastError = null;
 
   for (const model of models) {
