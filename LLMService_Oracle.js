@@ -72,7 +72,7 @@ export const generateDeepInsightsGroq = async (logs, apiKey) => {
         "Authorization": `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "openai/gpt-oss-20b",
         messages: [
           { role: "system", content: systemInstruction },
           { role: "user", content: `Logs to extract: ${logDataString}` }
@@ -153,7 +153,7 @@ export const extractEntitiesWithOracle = async (logs, apiKey, currentCategories)
         "Authorization": `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "openai/gpt-oss-20b",
         messages: [
           { role: "system", content: systemInstruction },
           { role: "user", content: `Logs to extract: ${logDataString}` }
@@ -234,7 +234,7 @@ export const askPulseWithGroq = async (question, logs, apiKey) => {
         "Authorization": `Bearer ${cleanApiKey}`
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "openai/gpt-oss-20b",
         messages: [
           { role: "system", content: systemInstruction },
           { role: "user", content: `Logs: ${logDataString}\nQuestion: ${question}` }
@@ -293,7 +293,7 @@ export const classifyLogsEmotion = async (logs, apiKey, allowedCategories) => {
         "Authorization": `Bearer ${apiKey.trim()}`
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "openai/gpt-oss-20b",
         messages: [
           { role: "system", content: systemInstruction },
           { role: "user", content: `Logs: ${JSON.stringify(logsToProcess)}` }
