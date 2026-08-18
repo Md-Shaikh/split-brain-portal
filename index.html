@@ -1456,6 +1456,13 @@
             }
           });
           if (edgeErr) throw edgeErr;
+          
+          if (edgeRes && edgeRes.error_message) {
+             alert(edgeRes.error_message);
+             setIsSyncingOracle(false);
+             return;
+          }
+
           if (edgeRes && edgeRes.result) {
             setOracleInsights(edgeRes.result);
             if (edgeRes.ai_calls_today !== undefined) {
