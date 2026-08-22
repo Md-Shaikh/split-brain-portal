@@ -504,7 +504,10 @@
       const [authLoading, setAuthLoading] = useState(false);
       const [authError, setAuthError] = useState(null);
       const [authSuccessMsg, setAuthSuccessMsg] = useState(null);
-      const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'forgot' | 'reset'
+      const [authMode, setAuthMode] = useState(() => {
+        const raw = typeof window !== 'undefined' ? (window.__INITIAL_HASH__ || window.location.hash || window.location.search || '') : '';
+        return raw.includes('type=recovery') ? 'reset' : 'login';
+      });
       const [authAcceptedTerms, setAuthAcceptedTerms] = useState(false);
       const [legalModalTab, setLegalModalTab] = useState(null); // null | 'terms' | 'privacy'
       const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
@@ -538,8 +541,9 @@
             if (window.history && window.history.replaceState) {
               window.history.replaceState(null, '', window.location.pathname);
             }
-          } else if (activeHash.includes('type=recovery')) {
+          } else if (activeHash.includes('type=recovery') || (window.location.search && window.location.search.includes('type=recovery'))) {
             setIsPasswordRecovery(true);
+            setAuthMode('reset');
             setCurrentView('settings');
           }
           window.__INITIAL_HASH__ = '';
@@ -553,8 +557,9 @@
         // Listen for auth state changes & recovery events
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
           setSession(session);
-          if (event === 'PASSWORD_RECOVERY' || (window.location.hash || '').includes('type=recovery')) {
+          if (event === 'PASSWORD_RECOVERY' || (window.location.hash || '').includes('type=recovery') || (window.location.search || '').includes('type=recovery')) {
             setIsPasswordRecovery(true);
+            setAuthMode('reset');
             setCurrentView('settings');
           }
         });
@@ -2096,7 +2101,7 @@
       const userAgentLower = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
       const isAndroidDevice = userAgentLower.includes('android');
       const isInsideMedianApp = userAgentLower.includes('median');
-      const showContinueInAppBanner = isAndroidDevice && !isInsideMedianApp && !dismissAppBanner;
+      const showContinueInAppBanner = isAndroidDevice && !isInsideMedianApp && !dismissAppBanner && authMode !== 'reset' && !isRecoveryUrl;
 
       // Detect password recovery from URL (reliable, doesn't depend on async state)
       const isRecoveryUrl = (
