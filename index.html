@@ -1642,7 +1642,7 @@
                         setAuthSuccessMsg(null);
                         try {
                           const { error } = await supabase.auth.resetPasswordForEmail(authEmail, {
-                            redirectTo: window.location.origin + window.location.pathname
+                            redirectTo: 'https://split-brain-portal.vercel.app/reset-password.html'
                           });
                           if (error) throw error;
                           setAuthSuccessMsg("Password reset link sent! Please check your email inbox to reset your password.");
