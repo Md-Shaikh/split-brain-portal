@@ -1886,58 +1886,47 @@
                     )}
                   </div>
 
-                  {(() => {
-                    const isMobileOrTablet = typeof navigator !== 'undefined' && (
-                      /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini|mobile|tablet/i.test(navigator.userAgent.toLowerCase()) ||
-                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-                    );
-                    if (isMobileOrTablet) return null;
+                  {/* Google OAuth Sign-In (Available for all Mobile, Desktop & App Users) */}
+                  <div className="relative flex items-center justify-center py-2">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-white/5"></div>
+                    </div>
+                    <span className="relative bg-zinc-950 px-3 text-[10px] uppercase font-bold text-gray-500 font-mono tracking-wider z-10">
+                      or
+                    </span>
+                  </div>
 
-                    return (
-                      <React.Fragment>
-                        <div className="relative flex items-center justify-center py-2">
-                          <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-white/5"></div>
-                          </div>
-                          <span className="relative bg-zinc-950 px-3 text-[10px] uppercase font-bold text-gray-500 font-mono tracking-wider z-10">
-                            or
-                          </span>
-                        </div>
+                  <button
+                    onClick={async () => {
+                      setAuthLoading(true);
+                      setAuthError(null);
+                      setAuthSuccessMsg(null);
+                      try {
+                        const { data, error } = await supabase.auth.signInWithOAuth({
+                          provider: 'google',
+                          options: {
+                            redirectTo: window.location.origin + '/'
+                          }
+                        });
 
-                        <button
-                          onClick={async () => {
-                            setAuthLoading(true);
-                            setAuthError(null);
-                            setAuthSuccessMsg(null);
-                            try {
-                              const { data, error } = await supabase.auth.signInWithOAuth({
-                                provider: 'google',
-                                options: {
-                                  redirectTo: 'https://split-brain-portal.vercel.app/'
-                                }
-                              });
-
-                              if (error) {
-                                console.error("Error logging in with Google:", error.message);
-                                throw error;
-                              }
-                            } catch (err) {
-                              setAuthError(err.message);
-                            } finally {
-                              setAuthLoading(false);
-                            }
-                          }}
-                          disabled={authLoading}
-                          className="w-full bg-white/5 border border-white/10 hover:bg-white/15 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2.5 text-xs shadow-md"
-                        >
-                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.513 0-6.386-2.87-6.386-6.385s2.87-6.386 6.386-6.386c1.543 0 2.957.557 4.05 1.5l3.15-3.15C19.26 2.228 15.937 1 12.24 1 6.042 1 1 6.042 1 12.24s5.042 11.24 11.24 11.24c6.386 0 11.24-5.042 11.24-11.24 0-.771-.086-1.5-.24-2.185H12.24z"/>
-                          </svg>
-                          Continue with Google
-                        </button>
-                      </React.Fragment>
-                    );
-                  })()}
+                        if (error) {
+                          console.error("Error logging in with Google:", error.message);
+                          throw error;
+                        }
+                      } catch (err) {
+                        setAuthError(err.message);
+                      } finally {
+                        setAuthLoading(false);
+                      }
+                    }}
+                    disabled={authLoading}
+                    className="w-full bg-white/5 border border-white/10 hover:bg-white/15 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2.5 text-xs shadow-md active:scale-[0.99]"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.513 0-6.386-2.87-6.386-6.385s2.87-6.386 6.386-6.386c1.543 0 2.957.557 4.05 1.5l3.15-3.15C19.26 2.228 15.937 1 12.24 1 6.042 1 1 6.042 1 12.24s5.042 11.24 11.24 11.24c6.386 0 11.24-5.042 11.24-11.24 0-.771-.086-1.5-.24-2.185H12.24z"/>
+                    </svg>
+                    Continue with Google
+                  </button>
 
                   <div className="mt-6 border-t border-white/5 pt-4 text-center">
                     <button
