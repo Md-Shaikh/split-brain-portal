@@ -1722,8 +1722,13 @@
                           setAuthSuccessMsg("Password updated successfully! Please sign in with your new password.");
                           setAuthMode('login');
                           setAuthNewPassword('');
+                          setIsPasswordRecovery(false);
                         } catch (err) {
-                          setAuthError(err.message);
+                          if (err.message && err.message.toLowerCase().includes('auth session missing')) {
+                            setAuthError("This password reset link has already been used or expired. Your password may already be updated — please try signing in below.");
+                          } else {
+                            setAuthError(err.message);
+                          }
                         } finally {
                           setAuthLoading(false);
                         }
@@ -1732,6 +1737,24 @@
                       className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-teal-500/10 flex items-center justify-center gap-2"
                     >
                       {authLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : 'Update Password'}
+                    </button>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-white/5 text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('login');
+                        setAuthError(null);
+                        setAuthSuccessMsg(null);
+                        setIsPasswordRecovery(false);
+                        if (window.history && window.history.replaceState) {
+                          window.history.replaceState(null, '', window.location.pathname);
+                        }
+                      }}
+                      className="text-xs text-cyan-400 hover:text-cyan-300 transition-all font-medium"
+                    >
+                      ← Back to Sign In
                     </button>
                   </div>
                 </div>
