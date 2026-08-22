@@ -24,9 +24,24 @@
     }
   </script>
   
-  <!-- Capture hash before Supabase strips it -->
+  <!-- Capture hash/token before Supabase strips it. Also handles query-param tokens from Android deep links -->
   <script>
     window.__INITIAL_HASH__ = window.location.hash;
+    // Android WebViews strip #hash from intent:// links, so we also accept tokens via query params
+    // and convert them back to a hash so Supabase auth can process them normally.
+    (function() {
+      const sp = new URLSearchParams(window.location.search);
+      const at = sp.get('access_token');
+      const rt = sp.get('refresh_token');
+      const type = sp.get('type');
+      if (at && rt && type) {
+        // Reconstruct hash and set as initial hash for Supabase & our recovery handler
+        const reconstructed = '#access_token=' + at + '&refresh_token=' + rt + '&type=' + type;
+        window.__INITIAL_HASH__ = reconstructed;
+        // Also set the actual hash so Supabase client can auto-detect and set the session
+        try { window.history.replaceState(null, '', window.location.pathname + reconstructed); } catch(e) {}
+      }
+    })();
   </script>
   
   <style>
@@ -2084,19 +2099,18 @@
       const showContinueInAppBanner = isAndroidDevice && !isInsideMedianApp && !dismissAppBanner;
 
       // Construct Deep Link Intent URL with Auth / Password Recovery tokens
+      // IMPORTANT: Android WebViews strip #hash from intent:// links.
+      // We pass tokens as ?query_params instead, which are reliably preserved.
+      // The in-app page reads them back and reconstructs the hash for Supabase.
       const appIntentUrl = (() => {
-        let hashString = '';
+        let queryString = '';
         if (session && session.access_token && session.refresh_token) {
-          hashString = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&type=recovery`;
-        } else if (isPasswordRecovery) {
-          hashString = 'type=recovery';
+          queryString = `?access_token=${encodeURIComponent(session.access_token)}&refresh_token=${encodeURIComponent(session.refresh_token)}&type=recovery`;
         }
         
-        const fallbackTarget = hashString 
-          ? `https%3A%2F%2Fsplit-brain-portal.vercel.app%2F%23${encodeURIComponent(hashString)}`
-          : 'https%3A%2F%2Fsplit-brain-portal.vercel.app%2F';
-          
-        return `intent://split-brain-portal.vercel.app/${hashString ? '#' + hashString : ''}#Intent;scheme=https;package=co.median.android.lpoynmo;S.browser_fallback_url=${fallbackTarget};end`;
+        const appUrl = `https://split-brain-portal.vercel.app/${queryString}`;
+        const fallbackUrl = encodeURIComponent(appUrl);
+        return `intent://split-brain-portal.vercel.app/${queryString}#Intent;scheme=https;package=co.median.android.lpoynmo;S.browser_fallback_url=${fallbackUrl};end`;
       })();
 
       return (
