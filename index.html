@@ -492,6 +492,7 @@
       const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'forgot' | 'reset'
       const [authAcceptedTerms, setAuthAcceptedTerms] = useState(false);
       const [legalModalTab, setLegalModalTab] = useState(null); // null | 'terms' | 'privacy'
+      const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
       // 1. Navigation View State
       const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' | 'daily-pulse' | 'settings'
@@ -523,11 +524,9 @@
               window.history.replaceState(null, '', window.location.pathname);
             }
           } else if (activeHash.includes('type=recovery')) {
+            setIsPasswordRecovery(true);
             setCurrentView('settings');
-            // Allow Supabase to handle the implicit login from the hash, 
-            // which will make session truthy and render the settings view.
           }
-          // Clear initial hash so it doesn't trigger on subsequent re-renders if ignored
           window.__INITIAL_HASH__ = '';
         }
         
@@ -539,7 +538,8 @@
         // Listen for auth state changes & recovery events
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
           setSession(session);
-          if (event === 'PASSWORD_RECOVERY') {
+          if (event === 'PASSWORD_RECOVERY' || (window.location.hash || '').includes('type=recovery')) {
+            setIsPasswordRecovery(true);
             setCurrentView('settings');
           }
         });
@@ -2083,6 +2083,22 @@
       const isInsideMedianApp = userAgentLower.includes('median');
       const showContinueInAppBanner = isAndroidDevice && !isInsideMedianApp && !dismissAppBanner;
 
+      // Construct Deep Link Intent URL with Auth / Password Recovery tokens
+      const appIntentUrl = (() => {
+        let hashString = '';
+        if (session && session.access_token && session.refresh_token) {
+          hashString = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&type=recovery`;
+        } else if (isPasswordRecovery) {
+          hashString = 'type=recovery';
+        }
+        
+        const fallbackTarget = hashString 
+          ? `https%3A%2F%2Fsplit-brain-portal.vercel.app%2F%23${encodeURIComponent(hashString)}`
+          : 'https%3A%2F%2Fsplit-brain-portal.vercel.app%2F';
+          
+        return `intent://split-brain-portal.vercel.app/${hashString ? '#' + hashString : ''}#Intent;scheme=https;package=co.median.android.lpoynmo;S.browser_fallback_url=${fallbackTarget};end`;
+      })();
+
       return (
         <div class="min-h-screen flex flex-col w-full max-w-7xl mx-auto p-3 sm:p-6 pb-28 relative z-10 overflow-x-hidden">
           
@@ -2093,13 +2109,17 @@
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-400 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 mx-auto mb-4">
                   <span className="font-display font-black text-2xl text-white">S</span>
                 </div>
-                <h3 className="text-xl font-bold text-white mb-2">Authentication Complete!</h3>
+                <h3 className="text-xl font-bold text-white mb-2">
+                  {isPasswordRecovery ? 'Password Recovery Verified!' : 'Authentication Complete!'}
+                </h3>
                 <p className="text-xs text-gray-300 mb-6 leading-relaxed">
-                  You are currently signed in on your web browser. Tap below to launch and continue in your Android App.
+                  {isPasswordRecovery 
+                    ? 'Your password reset link is verified. Tap below to launch your Android App and set your new password, or set it directly on web.' 
+                    : 'You are currently signed in on your web browser. Tap below to launch and continue in your Android App.'}
                 </p>
                 
                 <a 
-                  href="intent://split-brain-portal.vercel.app/#Intent;scheme=https;package=co.median.android.lpoynmo;S.browser_fallback_url=https%3A%2F%2Fsplit-brain-portal.vercel.app%2F;end"
+                  href={appIntentUrl}
                   className="w-full bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-bold py-3.5 px-6 rounded-xl transition-all shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 text-sm font-display text-center"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2109,10 +2129,13 @@
                 </a>
 
                 <button 
-                  onClick={() => setDismissAppBanner(true)}
+                  onClick={() => {
+                    setDismissAppBanner(true);
+                    if (isPasswordRecovery) setCurrentView('settings');
+                  }}
                   className="mt-4 text-xs text-gray-400 hover:text-white transition-all underline font-medium block mx-auto"
                 >
-                  Stay in Web Browser
+                  {isPasswordRecovery ? 'Set New Password on Web Browser' : 'Stay in Web Browser'}
                 </button>
               </div>
             </div>
@@ -2954,6 +2977,7 @@
 
                       <button
                         onClick={async () => {
+                          setIsPasswordRecovery(false);
                           await supabase.auth.signOut();
                         }}
                         class="px-4 py-2 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 text-xs font-bold rounded-xl transition-all flex items-center gap-2"
@@ -2966,7 +2990,19 @@
                     </div>
                   </div>
                   {/* Account Security - Password Change */}
-                  <div class="mt-6 border-t border-white/10 pt-6">
+                  <div class={`mt-6 border-t border-white/10 pt-6 ${isPasswordRecovery ? 'ring-2 ring-cyan-400/50 bg-cyan-500/5 p-4 rounded-2xl' : ''}`}>
+                    {isPasswordRecovery && (
+                      <div className="bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-indigo-500/20 border border-cyan-400/30 text-cyan-200 text-xs rounded-xl p-4 mb-4 shadow-lg flex items-center gap-3 animate-pulse">
+                        <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-400/30 flex items-center justify-center shrink-0 text-cyan-400 text-lg">
+                          🔑
+                        </div>
+                        <div>
+                          <p className="font-bold text-white text-sm mb-0.5">Password Recovery Active</p>
+                          <p className="text-cyan-300/80 text-[11px] leading-relaxed">Enter your new secure password below to complete your reset and secure your vault.</p>
+                        </div>
+                      </div>
+                    )}
+
                     <h3 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
                       <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4v-3.252l6.551-6.551A6 6 0 1115 9z" />
@@ -3006,8 +3042,9 @@
                             try {
                               const { error } = await supabase.auth.updateUser({ password: settingsNewPassword });
                               if (error) throw error;
-                              setSettingsPasswordMsg("Password updated successfully.");
+                              setSettingsPasswordMsg("Password updated successfully! Your account is now secured with your new password.");
                               setSettingsNewPassword('');
+                              setIsPasswordRecovery(false);
                             } catch (err) {
                               setSettingsPasswordError(err.message);
                             } finally {
