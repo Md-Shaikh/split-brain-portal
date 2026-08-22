@@ -527,12 +527,45 @@
       useEffect(() => {
         if (!supabase) return;
 
+        // Check if access_token and refresh_token are in URL search params (from Android app deep link)
+        const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+        const urlAccessToken = urlParams ? urlParams.get('access_token') : null;
+        const urlRefreshToken = urlParams ? urlParams.get('refresh_token') : null;
+
+        if (urlAccessToken && urlRefreshToken) {
+          // Explicitly authenticate session using tokens passed from mobile deep link!
+          supabase.auth.setSession({
+            access_token: urlAccessToken,
+            refresh_token: urlRefreshToken
+          }).then(({ data, error }) => {
+            if (!error && data?.session) {
+              setSession(data.session);
+              if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', window.location.pathname);
+              }
+            }
+          });
+        }
+
         // Check if user landed directly from a password recovery email link or with an error
         const activeHash = window.__INITIAL_HASH__ || window.location.hash;
         if (activeHash) {
           const hashParams = new URLSearchParams(activeHash.substring(1));
           const errorDescription = hashParams.get('error_description');
           const errorCode = hashParams.get('error_code');
+          const hashAccessToken = hashParams.get('access_token');
+          const hashRefreshToken = hashParams.get('refresh_token');
+
+          if (hashAccessToken && hashRefreshToken && !urlAccessToken) {
+            supabase.auth.setSession({
+              access_token: hashAccessToken,
+              refresh_token: hashRefreshToken
+            }).then(({ data, error }) => {
+              if (!error && data?.session) {
+                setSession(data.session);
+              }
+            });
+          }
           
           if (errorDescription || errorCode === 'otp_expired') {
             const cleanMsg = errorDescription 
@@ -554,12 +587,12 @@
         
         // Initial session check
         supabase.auth.getSession().then(({ data: { session } }) => {
-          setSession(session);
+          if (session) setSession(session);
         });
 
         // Listen for auth state changes & recovery events
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-          setSession(session);
+          if (session) setSession(session);
           if (event === 'PASSWORD_RECOVERY' || (window.location.hash || '').includes('type=recovery') || (window.location.search || '').includes('type=recovery')) {
             setIsPasswordRecovery(true);
             setAuthMode('reset');
