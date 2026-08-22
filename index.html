@@ -34,9 +34,12 @@
       const at = sp.get('access_token');
       const rt = sp.get('refresh_token');
       const type = sp.get('type');
-      if (at && rt && type) {
+      if (at && rt) {
         // Reconstruct hash and set as initial hash for Supabase & our recovery handler
-        const reconstructed = '#access_token=' + at + '&refresh_token=' + rt + '&type=' + type;
+        let reconstructed = '#access_token=' + at + '&refresh_token=' + rt;
+        if (type) {
+          reconstructed += '&type=' + type;
+        }
         window.__INITIAL_HASH__ = reconstructed;
         // Also set the actual hash so Supabase client can auto-detect and set the session
         try { window.history.replaceState(null, '', window.location.pathname + reconstructed); } catch(e) {}
@@ -2130,7 +2133,7 @@
       const appIntentUrl = (() => {
         let queryString = '';
         if (session && session.access_token && session.refresh_token) {
-          queryString = `?access_token=${encodeURIComponent(session.access_token)}&refresh_token=${encodeURIComponent(session.refresh_token)}&type=recovery`;
+          queryString = `?access_token=${encodeURIComponent(session.access_token)}&refresh_token=${encodeURIComponent(session.refresh_token)}${isRecoveryUrl ? '&type=recovery' : ''}`;
         }
         
         const appUrl = `https://split-brain-portal.vercel.app/${queryString}`;
